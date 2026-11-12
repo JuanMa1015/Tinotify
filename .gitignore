@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+.env
+.env.*
+!.env.example
+
+.vscode/
+.idea/
+
+*.sqlite3
+*.db
+
+# Datos y respuestas de SIGAC
+casos_reales/
+expedientes/
+sesiones/
+cookies.json
+estado_monitor.json
+estado_monitor.tmp
