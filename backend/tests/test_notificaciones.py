@@ -48,9 +48,11 @@ def test_crear_notificacion():
         direccion="ASESOR-->ESTUDIANTE",
     )
 
-    assert notificacion.caso == 12345
+    # Etapa 3: el payload de aviso no expone identificadores del expediente.
+    assert not hasattr(notificacion, "caso")
+    assert not hasattr(notificacion, "direccion")
     assert notificacion.prioridad == Prioridad.ALTA
     assert notificacion.titulo == (
-        "Nueva actuación importante"
+        "Nueva información importante"
     )
-    assert "12345" in notificacion.mensaje
+    assert "12345" not in notificacion.mensaje

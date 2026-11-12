@@ -16,8 +16,8 @@ autorizada fuera del sandbox aprobó las 54.
 
 La etapa 1 amplió exclusiones y documentación. La etapa 2 reorganizó los módulos
 y configuró su empaquetado sin cambiar algoritmos ni comportamiento funcional.
-**Los hallazgos funcionales de este documento siguen pendientes de corregir.**
-Sus prioridades consideran el
+La etapa 3 implementó reconciliación conservadora, estado v2 y avisos genéricos;
+los avances y límites se indican abajo. Las prioridades consideran el
 uso futuro con datos sensibles; no significan que exista ya una API expuesta.
 
 ## Hallazgos
@@ -25,24 +25,25 @@ uso futuro con datos sensibles; no significan que exista ya una API expuesta.
 | ID | Gravedad | Ubicación | Riesgo y tratamiento propuesto |
 | --- | --- | --- | --- |
 | SEC-01 | Alta al compartir instancia | `monitor.py`, `sigac_service.py` | El estado solo distingue número de caso. No hay contexto de estudiante ni verificación de pertenencia. Introducir identidad interna y autorización por usuario/caso antes de servir a múltiples estudiantes. |
-| SEC-02 | Alta | `monitor.py` | Instancias con copias antiguas sobrescriben el JSON completo; comparten además el temporal. Se reprodujo pérdida de estado en memoria. Sustituir por persistencia transaccional y comprobar escritores concurrentes. |
+| SEC-02 | Alta con escritores concurrentes | `monitor.py` | V2 usa temporales únicos, no adelanta memoria al fallar y detecta bases ya alteradas. Sigue habiendo una ventana entre comprobación y reemplazo; requiere un único escritor hasta implementar persistencia transaccional. |
 | SEC-03 | Alta para entrega futura | `monitor.py`, `sigac_service.py` | El estado queda confirmado antes de entregar un aviso. Un fallo posterior puede perder la notificación. Guardar evento pendiente y detección en la misma transacción; entrega con reintentos e idempotencia. Hoy solo se devuelven objetos locales. |
 | SEC-04 | Media | `sigac_client.py` | Validar rutas relativas no limita endpoints ni parámetros. Acepta destinos arbitrarios del mismo origen y segmentos codificados. Definir lista explícita de operaciones, rutas, parámetros y destinos de redirección admitidos. |
 | SEC-05 | Media, condicionada a configuración | `sigac_client.py` | Un cliente inyectado puede cambiar origen o TLS; se comprobó otro origen con transporte simulado. Definir y comprobar el contrato del cliente de producción sin perder la inyección de transportes de prueba. |
 | SEC-06 | Media; aumenta si se descargan anexos | `parser.py` | La validación por sufijo permite rutas absolutas, recorridos relativos y fragmentos. Hoy solo conserva referencias. Validar ruta y consulta exactas antes de cualquier futura descarga. |
 | SEC-07 | Media | `sigac_client.py`, parsers | Sin límites explícitos de bytes o registros. Respuestas excesivas pueden consumir memoria o tiempo. Limitar lectura y procesamiento y distinguir respuestas incompletas. |
-| SEC-08 | Media de privacidad | `notificaciones.py` | El texto incluye el número de caso. No enviarlo directamente a pantallas bloqueadas: usar avisos genéricos y consultar detalles tras autorización. |
+| SEC-08 | Corregido en el payload local | `notificaciones.py` | La etapa 3 retiró caso y dirección del payload y usa textos genéricos por tipo de evento. La futura entrega push y el acceso autorizado a detalles siguen pendientes. |
 | SEC-09 | Media de privacidad | Metadatos del historial Git | El commit contiene identidad y correo de autoría. Estos metadatos acompañan al historial publicado. Revisar la identidad elegida antes de publicar; no se documentan sus valores. |
-| SEC-10 | Alta para exactitud del seguimiento | `parser.py`, `sigac_service.py`, `monitor.py` | El servicio descarta la huella del parser. El monitor usa fecha/dirección/descripción y omite remitente; puede fusionar actuaciones distintas. Cambios de etapa/anexos no se detectan. Separar identidad y versión de contenido con algoritmo documentado. |
+| SEC-10 | Mitigado con límites explícitos | Modelos, servicio y reconciliación | V2 conserva multiplicidad y todos los campos de versión. Confirma ediciones solo con ID estable y expresa ambigüedad sin él. Las observaciones indistinguibles siguen sin permitir reconstruir identidades físicas. |
 
 No se confirmaron hallazgos críticos en el alcance local revisado. La gravedad
 deberá reevaluarse cuando existan API, autenticación, descarga o despliegue.
 
 ## Persistencia y parsers: deuda adicional
 
-- El JSON no tiene esquema versionado, recuperación ante corrupción ni retención.
-- El estado en memoria cambia antes de confirmar la escritura; los fallos pueden
-  desalinear memoria y disco.
+- V2 tiene esquema versionado y rechaza corrupción sin destruirla; no implementa
+  reparación ni retención automática. V1 exige conversión explícita a otro archivo.
+- La memoria avanza después de una escritura exitosa; las consultas idénticas no
+  escriben estado. La comprobación de base no sustituye un bloqueo entre procesos.
 - Validar todos los expedientes antes de sincronizar no vuelve transaccionales
   las escrituras posteriores por caso.
 - Registros malformados pueden omitirse sin señalar que el historial es parcial.
@@ -51,9 +52,26 @@ deberá reevaluarse cuando existan API, autenticación, descarga o despliegue.
 - Las huellas son resúmenes deterministas, no cifrado ni garantía de anonimato.
 - Un caso guardado junto a hashes sigue revelando seguimiento y correlaciones.
 
-Las pruebas pendientes deben cubrir remitentes distintos con contenido igual,
-ediciones y anexos, resultados parciales, reinicios, fallos de escritura,
-concurrencia, usuarios distintos y reintentos de entrega.
+La etapa 3 prueba remitentes distintos con contenido igual, duplicados, ediciones,
+anexos, consultas parciales, reinicios, fallos de escritura y migración. Siguen
+pendientes concurrencia transaccional, usuarios distintos y reintentos de entrega.
+
+La suite contiene 241 casos: 54 originales y 187 adicionales. Solo se sustituyó
+la expectativa de un caso original para exigir que el aviso no revele el caso.
+Se ejecuta con datos sintéticos, red bloqueada y archivos temporales eliminados.
+No se instalaron dependencias en la etapa 3. Véase
+[reconciliacion.md](reconciliacion.md) para el contrato de IDs, la política de
+ambigüedad y el riesgo de omitir novedades al establecer la línea base v2.
+
+La revisión final detectó que el primer contrato de tipos confundía sintaxis y
+estabilidad. La corrección separa candidatos de afirmaciones verificadas y
+revalida estas últimas contra un catálogo de código revisado y una habilitación
+separada. El catálogo real está vacío; no se acepta que un booleano, un campo
+de configuración o el JSON aporten evidencia. Los contratos sintéticos se
+definen exclusivamente en pruebas. El formato v2.2 conserva la referencia del
+contrato y su alcance, y bloquea el seguimiento ante cambios de confianza hasta
+una transición explícita sin sobrescribir el origen. Véase
+[contratos-identidad.md](contratos-identidad.md) para sus garantías y límites.
 
 ## Sesiones, roles y redirecciones
 

@@ -1,26 +1,10 @@
-from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 import re
 from bs4 import BeautifulSoup, Tag
-from urllib.parse import urlsplit, parse_qs
+from urllib.parse import urlsplit
 
-@dataclass(frozen=True)
-class Anexo:
-    descripcion: str
-    archivo: str
-    referencia: str
-
-@dataclass(frozen=True)
-class Actuacion:
-    etapa: str
-    origen: str
-    destino: str
-    fecha: datetime
-    remitente: str
-    descripcion: str
-    huella: str
-    anexos: tuple[Anexo, ...] = ()
+from tinotify.domain.actuaciones import Actuacion, Anexo
 
 def clean(node: Tag) -> str:
     return node.get_text(' ', strip=True)

@@ -15,9 +15,9 @@ servidor ejecutable ni una aplicación móvil.
 | --- | --- |
 | Extraer casos desde HTML | Implementada y probada con ejemplos ficticios |
 | Extraer actuaciones y metadatos de anexos | Implementada; no descarga documentos |
-| Detectar nuevas actuaciones | Implementada con estado JSON local y limitaciones conocidas |
+| Reconciliar observaciones | Estado JSON v2, multiplicidad, versiones y ambigüedades explícitas |
 | Clasificar prioridad | Alta para `ASESOR-->ESTUDIANTE` y `DIRECCION-->ESTUDIANTE` |
-| Generar notificaciones | Objetos locales; no hay entrega push |
+| Generar notificaciones | Avisos locales genéricos por tipo y prioridad; no hay entrega push |
 | Cliente HTTP | Implementado con restricciones parciales de rutas y TLS verificado por defecto |
 | Seleccionar rol | POST implementado; no acredita autenticación ni autorización |
 | Reconocer página y menú | Comprobaciones preliminares; devuelven `autenticada=False` |
@@ -25,10 +25,22 @@ servidor ejecutable ni una aplicación móvil.
 | API FastAPI, SQLite/PostgreSQL y app Expo | Previstas, no implementadas |
 | Múltiples estudiantes | No soportados de forma segura actualmente |
 
-La suite actual contiene **54 pruebas**. Su aprobación no demuestra preparación
+La suite actual contiene **241 pruebas: 54 originales y 187 adicionales**.
+Una expectativa original cambió para exigir avisos sin datos del expediente.
+Su aprobación no demuestra preparación
 para producción ni compatibilidad con SIGAC real. Los riesgos de aislamiento,
 concurrencia, identificación y persistencia siguen abiertos en
 [seguridad](docs/security.md).
+
+La [reconciliación de actuaciones](docs/reconciliacion.md) distingue primera
+observación, modificación confirmada y cambio ambiguo. Sin IDs estables no puede
+identificar perfectamente una actuación. El parser no inventa IDs de SIGAC.
+Los estados v1 requieren conversión explícita a otro archivo y una nueva línea
+base, que puede omitir novedades durante la transición. Los hashes no anonimizan.
+La revisión actual del estado es v2.2. Un ID sintácticamente válido es solo un
+candidato: producción no tiene contratos estables de SIGAC habilitados. Los
+estados anteriores o los cambios de confianza exigen transición explícita sin
+elevar IDs antiguos. Véase [contratos de identidad](docs/contratos-identidad.md).
 
 ## Requisitos y dependencias
 
@@ -109,17 +121,19 @@ tinotify/
 ├── backend/
 │   ├── pyproject.toml
 │   ├── src/tinotify/
-│   │   ├── domain/notificaciones.py
+│   │   ├── domain/                   # Actuaciones, identificadores y avisos
 │   │   ├── parsers/                  # casos_parser.py y parser.py
-│   │   ├── services/sigac_service.py
+│   │   ├── services/                 # sigac_service.py y reconciliacion.py
 │   │   ├── integrations/sigac/       # Cliente, roles, menú y sesión
 │   │   ├── persistence/monitor.py
 │   │   └── api/                      # Paquete vacío; sin FastAPI
 │   └── tests/
-│       ├── test_*.py                 # Once archivos, 54 pruebas
+│       ├── test_*.py                 # Dieciséis archivos, 241 pruebas
 │       └── fixtures/caso_prueba.html
 ├── docs/
 │   ├── architecture.md
+│   ├── contratos-identidad.md
+│   ├── reconciliacion.md
 │   └── security.md
 ├── .env.example
 ├── .gitignore
@@ -152,7 +166,7 @@ como fixtures. Reconocer un menú no sustituye la autorización del servidor.
 
 1. Preparar documentación y dependencias: completado.
 2. Empaquetar y migrar módulos manteniendo las pruebas aprobadas: implementado.
-3. Unificar identidad de actuaciones y reforzar parsers y rutas permitidas.
+3. Identidad, versión de contenido y reconciliación conservadora: implementado.
 4. Implementar persistencia transaccional y aislamiento por estudiante.
 5. Crear una API FastAPI sobre datos sintéticos.
 6. Revisar permisos y diseñar la integración institucional y las sesiones.
