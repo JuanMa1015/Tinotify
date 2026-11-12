@@ -26,12 +26,18 @@ servidor ejecutable ni una aplicación móvil.
 | API FastAPI y app Expo | Previstas, no implementadas |
 | Múltiples estudiantes | No soportados de forma segura actualmente |
 
-La suite actual contiene **241 pruebas: 54 originales y 187 adicionales**.
+La suite de esta rama contiene **281 pruebas: 54 originales y 227 adicionales**.
+Incluye 40 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
 Una expectativa original cambió para exigir avisos sin datos del expediente.
 Su aprobación no demuestra preparación
 para producción ni compatibilidad con SIGAC real. Los riesgos de aislamiento,
 concurrencia, identificación y persistencia siguen abiertos en
 [seguridad](docs/security.md).
+
+La [preparación 4B.1](docs/etapa-4b-1.md) contiene una migración propuesta de ocho
+tablas con acceso cerrado y scripts de integridad/concurrencia para revisión.
+No se ha aplicado ni probado contra PostgreSQL remoto. El parser aprobado en
+`526f01b` permanece en su rama independiente y no se fusiona en esta entrega.
 
 La [reconciliación de actuaciones](docs/reconciliacion.md) distingue primera
 observación, modificación confirmada y cambio ambiguo. Sin IDs estables no puede
