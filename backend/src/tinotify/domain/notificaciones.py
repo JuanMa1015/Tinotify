@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from tinotify.domain.actuaciones import TipoCambio
+
 
 class Prioridad(str, Enum):
     ALTA = "alta"
@@ -16,8 +18,7 @@ DIRECCIONES_PRIORITARIAS = {
 
 @dataclass(frozen=True)
 class Notificacion:
-    caso: int
-    direccion: str
+    tipo: TipoCambio
     prioridad: Prioridad
     titulo: str
     mensaje: str
@@ -44,18 +45,24 @@ def clasificar_prioridad(direccion: str) -> Prioridad:
 def crear_notificacion(
     caso: int,
     direccion: str,
+    tipo: TipoCambio = TipoCambio.PRIMERA_OBSERVACION,
 ) -> Notificacion:
+    """El caso se acepta por compatibilidad, pero no forma parte del aviso."""
+    tipo = TipoCambio(tipo)
     prioridad = clasificar_prioridad(direccion)
-
-    if prioridad == Prioridad.ALTA:
-        titulo = "Nueva actuación importante"
+    if tipo == TipoCambio.CAMBIO_AMBIGUO:
+        titulo = "Cambios pendientes de clasificar"
+        mensaje = "Se observaron diferencias que requieren revisión."
+    elif tipo == TipoCambio.MODIFICACION_CONFIRMADA:
+        titulo = "Información actualizada"
+        mensaje = "Se detectó una modificación. Revisa la aplicación."
     else:
-        titulo = "Nueva actuación registrada"
+        titulo = "Nueva información importante" if prioridad == Prioridad.ALTA else "Nueva información disponible"
+        mensaje = "Hay información observada por primera vez. Revisa la aplicación."
 
     return Notificacion(
-        caso=caso,
-        direccion=direccion,
+        tipo=tipo,
         prioridad=prioridad,
         titulo=titulo,
-        mensaje=f"Hay una nueva actuación en el caso {caso}.",
+        mensaje=mensaje,
     )

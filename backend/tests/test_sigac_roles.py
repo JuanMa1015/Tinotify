@@ -1,7 +1,7 @@
 
 import pytest
 
-from sigac_roles import RolSigac, datos_seleccion_rol
+from tinotify.integrations.sigac.sigac_roles import RolSigac, datos_seleccion_rol
 
 
 def test_datos_rol_estudiante():

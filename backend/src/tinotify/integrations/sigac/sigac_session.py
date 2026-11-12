@@ -3,12 +3,12 @@ from dataclasses import dataclass
 
 from bs4 import BeautifulSoup
 
-from sigac_client import (
+from tinotify.integrations.sigac.sigac_client import (
     SigacClient,
     SigacClientError,
     SigacSessionExpired,
 )
-from sigac_menu import validar_menu_estudiante
+from tinotify.integrations.sigac.sigac_menu import validar_menu_estudiante
 
 
 @dataclass(frozen=True)

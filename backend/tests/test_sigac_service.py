@@ -1,9 +1,9 @@
 
 import pytest
 
-from monitor import MonitorActuaciones
-from notificaciones import Prioridad
-from sigac_service import SigacService
+from tinotify.persistence.monitor import MonitorActuaciones
+from tinotify.domain.notificaciones import Prioridad
+from tinotify.services.sigac_service import SigacService
 
 
 HTML_CASOS = """

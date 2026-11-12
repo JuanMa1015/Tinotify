@@ -1,22 +1,74 @@
+# Python
 .venv/
+venv/
 __pycache__/
-.pytest_cache/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.egg-info/
+build/
+dist/
 
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+web-build/
+coverage/
+*.tsbuildinfo
+
+# Configuracion y secretos
 .env
 .env.*
 !.env.example
+.npmrc
+.pypirc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
 
-.vscode/
-.idea/
-
-*.sqlite3
-*.db
-
-# Datos y respuestas de SIGAC
+# Datos privados y sesiones
+datos_privados/
 casos_reales/
 expedientes/
+anexos/
+descargas/
+exportaciones/
 sesiones/
-cookies.json
-estado_monitor.json
-estado_monitor.tmp
+cookies/
+cookies*.json
+*cookies*.txt
+*session*.json
+*sesion*.json
+*storage_state*.json
+*.har
+estado_monitor.*
+
+# Persistencia local (incluidos journals, WAL y SHM)
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Registros y temporales
+*.log
+*.tmp
+*.bak
+*.orig
+
+# Editor y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

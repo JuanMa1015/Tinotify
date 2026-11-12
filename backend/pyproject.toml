@@ -1,0 +1,55 @@
+# Construccion y modo editable con herramientas de versiones explicitas.
+[build-system]
+requires = ["setuptools==65.5.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tinotify-backend"
+version = "0.1.0"
+description = "Prototipo de procesamiento local y deteccion de novedades de SIGAC"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "beautifulsoup4==4.15.0",
+    "httpx==0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+]
+
+# Entorno completo observado y probado con CPython 3.11.9 en Windows.
+# Incluye dependencias transitivas de ejecucion y pruebas; excluye bs4,
+# pip y setuptools, que no son dependencias de la aplicacion.
+# Mantener las versiones directas sincronizadas con [project].
+# Instalacion desde la raiz: python -m pip install --group backend/pyproject.toml:local
+[dependency-groups]
+local = [
+    "anyio==4.16.0",
+    "beautifulsoup4==4.15.0",
+    "certifi==2026.10.23",
+    "colorama==0.4.6; sys_platform == 'win32'",
+    "h11==0.16.0",
+    "httpcore==1.0.9",
+    "httpx==0.28.1",
+    "idna==3.20",
+    "iniconfig==2.3.1",
+    "packaging==26.3",
+    "pluggy==1.7.0",
+    "Pygments==2.21.0",
+    "pytest==9.2.0",
+    "soupsieve==4.1",
+    "typing_extensions==4.16.0",
+]
+
+# Estos pins no son un lock con hashes de distribuciones. Otras plataformas
+# pueden activar dependencias condicionales adicionales; requieren validacion.
+# La licencia sigue pendiente. La configuracion de pytest esta en ../pytest.ini.
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["tinotify", "tinotify.*"]
+namespaces = false

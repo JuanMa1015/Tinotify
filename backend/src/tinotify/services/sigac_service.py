@@ -2,10 +2,11 @@
 from dataclasses import dataclass
 from typing import Mapping
 
-from casos_parser import Caso, extraer_casos
-from parser import Actuacion, parse_actuaciones
-from monitor import MonitorActuaciones
-from notificaciones import Notificacion
+from tinotify.parsers.casos_parser import Caso, extraer_casos
+from tinotify.parsers.parser import Actuacion, parse_actuaciones
+from tinotify.persistence.monitor import MonitorActuaciones
+from tinotify.domain.notificaciones import Notificacion
+from tinotify.domain.actuaciones import ResultadoReconciliacion
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,7 @@ class ResultadoCaso:
     caso: Caso
     actuaciones: tuple[Actuacion, ...]
     notificaciones: tuple[Notificacion, ...]
+    reconciliacion: ResultadoReconciliacion
 
 
 class SigacService:
@@ -22,22 +24,11 @@ class SigacService:
     @staticmethod
     def convertir_actuacion(
         actuacion: Actuacion,
-    ) -> dict[str, str]:
+    ) -> Actuacion:
         """
-        Adapta el modelo del parser a la interfaz
-        que espera el monitor existente.
+        Conserva todos los metadatos para el único motor de reconciliación.
         """
-        return {
-            "fecha": actuacion.fecha.isoformat(
-                sep=" ",
-                timespec="seconds",
-            ),
-            "direccion": (
-                f"{actuacion.origen}-->"
-                f"{actuacion.destino}"
-            ),
-            "descripcion": actuacion.descripcion,
-        }
+        return actuacion
 
     def procesar(
         self,
@@ -98,16 +89,18 @@ class SigacService:
                 for actuacion in actuaciones
             ]
 
-            notificaciones = self.monitor.sincronizar(
+            reconciliacion = self.monitor.reconciliar(
                 caso.numero,
                 datos_monitor,
             )
+            notificaciones = self.monitor.notificaciones(caso.numero, reconciliacion)
 
             resultados.append(
                 ResultadoCaso(
                     caso=caso,
                     actuaciones=tuple(actuaciones),
                     notificaciones=tuple(notificaciones),
+                    reconciliacion=reconciliacion,
                 )
             )
 

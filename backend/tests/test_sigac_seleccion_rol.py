@@ -2,13 +2,13 @@
 import httpx
 import pytest
 
-from sigac_client import (
+from tinotify.integrations.sigac.sigac_client import (
     BASE_URL,
     SigacClient,
     SigacClientError,
     SigacSessionExpired,
 )
-from sigac_roles import RolSigac
+from tinotify.integrations.sigac.sigac_roles import RolSigac
 
 
 def crear_cliente(handler):

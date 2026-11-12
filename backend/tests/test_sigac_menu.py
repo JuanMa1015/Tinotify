@@ -1,5 +1,5 @@
 
-from sigac_menu import validar_menu_estudiante
+from tinotify.integrations.sigac.sigac_menu import validar_menu_estudiante
 
 
 HTML_MENU = """
