@@ -7,8 +7,9 @@ pendientes. Este repositorio no acredita respaldo ni autorización institucional
 
 ## Estado actual
 
-La implementación es una biblioteca Python experimental con módulos y pruebas
-en la raíz. No incluye todavía un servidor ejecutable ni una aplicación móvil.
+La implementación es una biblioteca Python experimental instalable, organizada
+en `backend/src/tinotify`, con pruebas en `backend/tests`. No incluye todavía un
+servidor ejecutable ni una aplicación móvil.
 
 | Capacidad | Estado |
 | --- | --- |
@@ -45,55 +46,88 @@ no es necesario desinstalarlo para ejecutar las pruebas.
 
 Los pins facilitan repetir el entorno verificado, pero no son un lock con hashes
 ni garantizan idéntica resolución en otras plataformas. No se consultaron bases
-externas de vulnerabilidades. El empaquetado instalable queda para otra etapa:
-**no ejecutar `pip install -e backend` todavía**.
+externas de vulnerabilidades. El empaquetado usa `setuptools==65.5.0` y
+`wheel==0.45.1` como herramientas de construcción; no son dependencias de ejecución.
+La distribución se llama `tinotify-backend` y el paquete importable es `tinotify`.
 
 ## Desarrollo local
 
-Desde la raíz del repositorio, si ya existe `.venv`, utilizar su intérprete:
-
-```powershell
-.\.venv\Scripts\python.exe --version
-.\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\python.exe -m pytest -v
-```
-
-Las pruebas usan datos ficticios, transportes HTTP simulados y directorios
-temporales para comprobar persistencia. No necesitan credenciales ni acceso a
-SIGAC. Se debe ejecutar pytest desde la raíz, donde permanecen los módulos.
-
-En un equipo nuevo, estos comandos preparan un entorno sin activar PowerShell:
+Desde la raíz del repositorio, preparar el entorno e instalar el paquete editable
+antes de ejecutar pytest. Si ya existe `.venv`, omitir su creación:
 
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip --version
 # Requiere que pip admita --group. La instalacion necesita acceso al indice.
 .\.venv\Scripts\python.exe -m pip install --group backend/pyproject.toml:local
+.\.venv\Scripts\python.exe -m pip install --no-deps -e .\backend
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m pytest -v
 ```
 
-Son instrucciones para preparar otro entorno; esta etapa de documentación no
-instala ni actualiza paquetes. Si pip no admite grupos, debe prepararse una
-versión compatible antes de utilizar el comando.
+La instalación editable puede descargar las herramientas de construcción fijadas
+en el manifiesto. Si ya están disponibles en el entorno, puede añadirse
+`--no-build-isolation --no-index` para construir sin acceder al índice. La
+instalación por grupos requiere una versión de pip que admita `--group`.
+
+Las pruebas usan datos ficticios, transportes HTTP simulados y directorios
+temporales para comprobar persistencia. No necesitan credenciales ni acceso a
+SIGAC. `pytest.ini` permite ejecutarlas desde la raíz con importaciones del
+paquete instalado, sin configurar `PYTHONPATH` ni modificar `sys.path`.
+
+La validación inicial de la migración utilizó entornos temporales. Al cerrar la
+etapa 2 se instaló también Tinotify en modo editable en el `.venv` principal,
+desde el proyecto local `backend/`, sin instalar ni actualizar otras dependencias.
+Las 54 pruebas pasaron desde la raíz con ese entorno y `pip check` no encontró
+conflictos. En otro entorno existente sigue siendo necesario instalar el paquete
+antes de ejecutar las nuevas pruebas.
+
+## Distribución y validación
+
+Para construir una wheel con el entorno preparado:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip wheel --no-deps --wheel-dir dist .\backend
+```
+
+Este comando puede preparar herramientas en un entorno de construcción aislado.
+La wheel solo contiene el paquete `tinotify` y sus metadatos; las pruebas y el
+HTML ficticio permanecen en el repositorio y no forman parte de la distribución.
+
+Durante la migración se verificaron exactamente 54 pruebas en cada paso, además
+de la instalación editable y una wheel instalada en otro entorno temporal. Las
+dos instalaciones se comprobaron desde fuera del repositorio con la red bloqueada.
+Los entornos reutilizaron las dependencias existentes mediante una referencia
+local de solo lectura; no fue una resolución independiente de dependencias desde
+cero. La única herramienta nueva autorizada fue `wheel==0.45.1`, instalada en el
+entorno temporal. Los archivos de estado de prueba se eliminaron al finalizar.
 
 ## Estructura actual
 
 ```text
 tinotify/
-├── *.py                 # Módulos y pruebas existentes, sin migrar
-├── caso_prueba.html      # Fixture ficticio usado por las pruebas de anexos
 ├── backend/
-│   └── pyproject.toml    # Manifiesto; todavía no contiene los módulos
+│   ├── pyproject.toml
+│   ├── src/tinotify/
+│   │   ├── domain/notificaciones.py
+│   │   ├── parsers/                  # casos_parser.py y parser.py
+│   │   ├── services/sigac_service.py
+│   │   ├── integrations/sigac/       # Cliente, roles, menú y sesión
+│   │   ├── persistence/monitor.py
+│   │   └── api/                      # Paquete vacío; sin FastAPI
+│   └── tests/
+│       ├── test_*.py                 # Once archivos, 54 pruebas
+│       └── fixtures/caso_prueba.html
 ├── docs/
 │   ├── architecture.md
 │   └── security.md
 ├── .env.example
 ├── .gitignore
+├── pytest.ini
 └── README.md
 ```
 
-La arquitectura objetivo y la migración por etapas se describen en
+La arquitectura actual y las siguientes etapas se describen en
 [arquitectura](docs/architecture.md). La app móvil aún no tiene carpeta ni código.
 
 ## Configuración y privacidad
@@ -116,8 +150,8 @@ como fixtures. Reconocer un menú no sustituye la autorización del servidor.
 
 ## Hoja de ruta
 
-1. Preparar documentación y dependencias sin modificar la lógica existente.
-2. Empaquetar y migrar módulos manteniendo las pruebas aprobadas.
+1. Preparar documentación y dependencias: completado.
+2. Empaquetar y migrar módulos manteniendo las pruebas aprobadas: implementado.
 3. Unificar identidad de actuaciones y reforzar parsers y rutas permitidas.
 4. Implementar persistencia transaccional y aislamiento por estudiante.
 5. Crear una API FastAPI sobre datos sintéticos.

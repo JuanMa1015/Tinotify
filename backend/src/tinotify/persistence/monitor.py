@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from notificaciones import crear_notificacion
+from tinotify.domain.notificaciones import crear_notificacion
 
 
 class MonitorActuaciones:

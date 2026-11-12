@@ -2,28 +2,35 @@
 
 ## Implementación actual
 
-El proyecto es una biblioteca Python 3.11 con módulos y pruebas en la raíz.
-`backend/pyproject.toml` es por ahora un manifiesto de dependencias: no mueve
-módulos, no configura pytest ni convierte el backend en paquete instalable.
+El proyecto es una biblioteca Python 3.11 instalable con módulos bajo
+`backend/src/tinotify` y once archivos de pruebas en `backend/tests`.
+`backend/pyproject.toml` declara dependencias, herramientas de construcción
+fijadas y descubrimiento de paquetes exclusivamente bajo `src/tinotify`.
+La configuración de pytest está en la raíz, en `pytest.ini`.
 
 | Módulo | Responsabilidad actual |
 | --- | --- |
-| `casos_parser.py` | Extraer casos desde HTML |
-| `parser.py` | Extraer actuaciones, huellas y metadatos de anexos |
-| `monitor.py` | Comparar actuaciones y guardar identificadores en JSON |
-| `notificaciones.py` | Construir objetos de notificación y clasificar prioridad |
-| `sigac_service.py` | Integrar parsers y monitor |
-| `sigac_client.py` | Cliente HTTP y envío de selección de rol |
-| `sigac_roles.py` | Roles admitidos y datos de selección |
-| `sigac_menu.py` | Reconocer enlaces del menú de estudiante |
-| `sigac_session.py` | Comprobaciones preliminares de páginas; no autentica |
+| `parsers/casos_parser.py` | Extraer casos desde HTML |
+| `parsers/parser.py` | Extraer actuaciones, huellas y metadatos de anexos |
+| `persistence/monitor.py` | Comparar actuaciones y guardar identificadores en JSON |
+| `domain/notificaciones.py` | Construir objetos de notificación y clasificar prioridad |
+| `services/sigac_service.py` | Integrar parsers y monitor |
+| `integrations/sigac/sigac_client.py` | Cliente HTTP y envío de selección de rol |
+| `integrations/sigac/sigac_roles.py` | Roles admitidos y datos de selección |
+| `integrations/sigac/sigac_menu.py` | Reconocer enlaces del menú de estudiante |
+| `integrations/sigac/sigac_session.py` | Comprobaciones preliminares de páginas; no autentica |
+
+Las rutas de la tabla son relativas a `backend/src/tinotify`. Los módulos se
+movieron completos: no se extrajeron modelos de los parsers ni se modificaron
+algoritmos. Todos los paquetes tienen `__init__.py` vacío y usan imports absolutos
+bajo `tinotify`. El grafo de dependencias internas no tiene ciclos.
 
 El flujo local actual es HTML aportado por el llamador, parsers, adaptación del
 servicio y monitor JSON. Los resultados incluyen objetos de notificación.
 El cliente HTTP todavía no forma una integración autenticada validada de extremo
 a extremo. No hay API, aplicación móvil, SQLite, PostgreSQL ni entrega push.
 
-## Estructura objetivo, todavía no creada
+## Estructura del backend y extensión futura
 
 ```text
 tinotify/
@@ -39,14 +46,17 @@ tinotify/
 │   │       └── api/
 │   └── tests/
 │       └── fixtures/
-├── mobile/
+├── mobile/                 # Previsto; todavía no creado
 ├── docs/
 ├── .env.example
 ├── .gitignore
+├── pytest.ini
 └── README.md
 ```
 
-`domain` contendrá modelos e invariantes independientes de FastAPI y de la base
+`api` solo contiene su `__init__.py` vacío; no hay endpoints ni dependencia de
+FastAPI. `domain` conserva las notificaciones actuales y podrá contener otros
+modelos e invariantes independientes de FastAPI y de la base
 de datos. `parsers` interpretará HTML sin red ni persistencia. `services`
 coordinará casos de uso mediante interfaces de persistencia e integración.
 `integrations/sigac` concentrará HTTP y validación de respuestas.
@@ -112,19 +122,30 @@ asíncrono con llamadas de red síncronas.
 
 | Etapa | Cambio propuesto | Verificación |
 | --- | --- | --- |
-| 1, autorizada | Exclusiones, README, manifiesto, ejemplo de entorno y documentación | Código funcional intacto; las 54 pruebas siguen aprobadas |
-| 2, pendiente | Empaquetado `src/tinotify`, traslado de módulos y pruebas | Importaciones actualizadas en conjunto; sin cambios de comportamiento |
+| 1, completada | Exclusiones, README, manifiesto, ejemplo de entorno y documentación | Código funcional intacto; 54 pruebas aprobadas |
+| 2, implementada | Empaquetado `src/tinotify`, traslado de módulos y pruebas | 54 pruebas aprobadas por paso y con instalaciones editable y wheel; sin cambios de comportamiento |
 | 3, pendiente | Identidad coherente, parsers y rutas endurecidos | Pruebas de remitentes, ediciones, anexos, rutas y respuestas parciales |
 | 4, pendiente | SQLite transaccional con aislamiento y eventos pendientes | Reinicio, errores de escritura, concurrencia e independencia de usuarios |
 | 5, pendiente | FastAPI sobre datos sintéticos | Contratos y autorización comprobados sin acceder a SIGAC |
 | 6, pendiente | Diseño institucional de autenticación y sesiones | Revisión de permisos y aprobación previa a la integración real |
 | 7, pendiente | Expo y notificaciones | Privacidad de avisos, caducidad y reintentos |
 
-Para la etapa 2 se actualizarán los imports de código y pruebas en el mismo
-cambio y se trasladará `caso_prueba.html` a fixtures actualizando las dos
-referencias de `test_anexos.py`. Se configurará un backend de build y la ejecución
-de pruebas desde la raíz; no se resolverá con modificaciones manuales de
-`sys.path`. Los movimientos se verificarán antes de refactorizar comportamiento.
+La etapa 2 actualizó los imports de código y pruebas y trasladó `caso_prueba.html`
+a `backend/tests/fixtures`, cambiando sus dos referencias en `test_anexos.py`.
+El archivo HTML se conservó idéntico. El cuerpo del monitor y el resto de la
+lógica se compararon sintácticamente con el commit base, excluyendo únicamente
+imports y las rutas autorizadas del fixture.
+
+Las pruebas se ejecutan desde la raíz, tras instalar el paquete editable,
+mediante `python -m pytest -v`. `pytest.ini` selecciona `backend/tests` y el modo
+de importación `importlib`, sin ajustes de `sys.path` ni `PYTHONPATH` para localizar
+el paquete. También se probaron editable y wheel desde fuera del repositorio,
+comprobando el origen real de todos los módulos importados. Las dependencias ya
+instaladas se reutilizaron sin alterarlas; no se validó una instalación completa
+de dependencias desde cero. El estado temporal de las pruebas se eliminó.
+
+El monitor sigue resolviendo su ruta predeterminada respecto al directorio de
+ejecución del llamador. Mover el módulo no cambió esa regla ni su persistencia.
 
 ## Configuración y decisiones pendientes
 

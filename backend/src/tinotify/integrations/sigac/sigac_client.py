@@ -1,6 +1,6 @@
 
 from urllib.parse import urlsplit
-from sigac_roles import RolSigac, datos_seleccion_rol
+from tinotify.integrations.sigac.sigac_roles import RolSigac, datos_seleccion_rol
 
 import httpx
 

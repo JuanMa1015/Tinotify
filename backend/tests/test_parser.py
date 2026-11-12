@@ -1,4 +1,4 @@
-from parser import parse_actuaciones
+from tinotify.parsers.parser import parse_actuaciones
 
 HTML = '''<table>
 <tr><td colspan="2"><hr/></td></tr>

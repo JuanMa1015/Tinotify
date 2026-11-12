@@ -14,8 +14,10 @@ Las 54 pruebas existentes aprobaron con la red bloqueada. Un primer intento en
 el sandbox falló por permisos de reemplazo de temporales; la repetición
 autorizada fuera del sandbox aprobó las 54.
 
-La etapa 1 amplía exclusiones y documentación. **Los hallazgos funcionales de
-este documento siguen pendientes de corregir.** Sus prioridades consideran el
+La etapa 1 amplió exclusiones y documentación. La etapa 2 reorganizó los módulos
+y configuró su empaquetado sin cambiar algoritmos ni comportamiento funcional.
+**Los hallazgos funcionales de este documento siguen pendientes de corregir.**
+Sus prioridades consideran el
 uso futuro con datos sensibles; no significan que exista ya una API expuesta.
 
 ## Hallazgos
@@ -98,11 +100,31 @@ referencias a anexos también deben tratarse como información sensible.
 `pip check` no encontró conflictos en el entorno Python 3.11.9 auditado.
 `backend/pyproject.toml` fija versiones directas y un grupo del entorno local.
 El paquete intermediario `bs4` no se declara porque basta `beautifulsoup4`.
-No se instalaron, actualizaron ni eliminaron dependencias durante esta etapa.
+No se instalaron, actualizaron ni eliminaron dependencias durante la auditoría
+inicial y la etapa 1. En la etapa 2 se autorizó instalar exclusivamente
+`wheel==0.45.1` como herramienta nueva en un entorno temporal. Las dependencias
+existentes conservaron sus versiones. Al cierre de la etapa 2, el entorno `.venv`
+principal recibió únicamente la instalación editable del proyecto local Tinotify,
+sin nuevas dependencias ni actualizaciones. Se reutilizó la herramienta temporal
+autorizada para construir sin acceder al índice y se verificaron las 54 pruebas
+desde la raíz con la red bloqueada.
 
-No se consultaron CVE, índices de paquetes ni servicios externos. La aprobación
-de pruebas y los pins no garantizan ausencia de vulnerabilidades. El manifiesto
-no contiene hashes de distribuciones y otras plataformas requieren validación.
+Las ubicaciones actuales de los módulos están en [architecture.md](architecture.md).
+Los nombres breves de la tabla de hallazgos identifican esos mismos módulos.
+Después de cada paso de migración se comprobaron exactamente 54 pruebas,
+ausencia de imports antiguos ya migrados y equivalencia sintáctica de la lógica
+con el commit base. Se validaron una instalación editable y una wheel instalada
+en entornos temporales distintos, importando desde fuera del checkout con la red
+bloqueada. Las dependencias se reutilizaron mediante acceso local a las ya
+instaladas; no se comprobó una resolución independiente desde un entorno vacío.
+El HTML ficticio se conservó idéntico y no quedaron estados de monitor en el
+repositorio ni en los directorios temporales de pruebas.
+
+No se consultaron bases externas de vulnerabilidades. El acceso autorizado al
+índice durante la etapa 2 se limitó a descargar la herramienta `wheel`; no se
+enviaron archivos del proyecto ni se contactó SIGAC. La aprobación de pruebas y
+los pins no garantizan ausencia de vulnerabilidades. El manifiesto no contiene
+hashes de distribuciones y otras plataformas requieren validación.
 
 ## Reportar un problema
 

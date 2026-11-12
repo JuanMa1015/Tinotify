@@ -2,10 +2,10 @@
 from dataclasses import dataclass
 from typing import Mapping
 
-from casos_parser import Caso, extraer_casos
-from parser import Actuacion, parse_actuaciones
-from monitor import MonitorActuaciones
-from notificaciones import Notificacion
+from tinotify.parsers.casos_parser import Caso, extraer_casos
+from tinotify.parsers.parser import Actuacion, parse_actuaciones
+from tinotify.persistence.monitor import MonitorActuaciones
+from tinotify.domain.notificaciones import Notificacion
 
 
 @dataclass(frozen=True)

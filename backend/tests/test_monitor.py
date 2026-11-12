@@ -1,6 +1,6 @@
 
-from monitor import MonitorActuaciones
-from notificaciones import Prioridad
+from tinotify.persistence.monitor import MonitorActuaciones
+from tinotify.domain.notificaciones import Prioridad
 
 
 def actuacion(fecha, direccion, descripcion):

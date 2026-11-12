@@ -1,5 +1,5 @@
 
-from notificaciones import (
+from tinotify.domain.notificaciones import (
     Prioridad,
     clasificar_prioridad,
     crear_notificacion,

@@ -1,5 +1,5 @@
 
-from casos_parser import extraer_casos
+from tinotify.parsers.casos_parser import extraer_casos
 
 
 HTML_PRUEBA = """

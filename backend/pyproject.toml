@@ -1,5 +1,8 @@
-# Etapa 1: manifiesto de dependencias. Los modulos siguen en la raiz.
-# No usar pip install -e backend: el empaquetado se preparara al migrarlos.
+# Construccion y modo editable con herramientas de versiones explicitas.
+[build-system]
+requires = ["setuptools==65.5.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "tinotify-backend"
 version = "0.1.0"
@@ -41,4 +44,12 @@ local = [
 
 # Estos pins no son un lock con hashes de distribuciones. Otras plataformas
 # pueden activar dependencias condicionales adicionales; requieren validacion.
-# No se declara licencia, sistema de build ni configuracion de pytest todavia.
+# La licencia sigue pendiente. La configuracion de pytest esta en ../pytest.ini.
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["tinotify", "tinotify.*"]
+namespaces = false
