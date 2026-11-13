@@ -1,0 +1,15 @@
+# Configuracion preparada; crear el servicio requiere una accion explicita.
+services:
+  - type: web
+    name: tinotify-api
+    runtime: python
+    plan: free
+    branch: main
+    rootDir: backend
+    autoDeployTrigger: "off"
+    buildCommand: python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check
+    startCommand: python -m uvicorn tinotify.api:app --host 0.0.0.0 --port "$PORT" --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.18"

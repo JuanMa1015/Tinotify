@@ -1,0 +1,52 @@
+name: Pruebas backend
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }}, Python 3.11)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Obtener codigo
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Preparar Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            backend/pyproject.toml
+            backend/requirements*.txt
+      - name: Instalar dependencias externas verificadas
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
+      - name: Construir e instalar solo el paquete local sin red
+        run: |
+          python backend/scripts/install_local.py
+          python -m pip check
+      - name: Ejecutar suite desde la raiz
+        run: python -m pytest -v -p no:cacheprovider
+      - name: Comprobar carga ASGI del paquete no editable
+        run: |
+          python -c "from uvicorn import Config; config = Config('tinotify.api:app', host='0.0.0.0', port=10000); config.load(); assert config.loaded"

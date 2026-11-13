@@ -1,6 +1,6 @@
 # Construccion y modo editable con herramientas de versiones explicitas.
 [build-system]
-requires = ["setuptools==65.5.0", "wheel==0.45.1"]
+requires = ["setuptools==84.2.1", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,7 +10,9 @@ description = "Prototipo de procesamiento local y deteccion de novedades de SIGA
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "beautifulsoup4==4.15.0",
+    "fastapi==0.162.7",
     "httpx==0.28.1",
+    "uvicorn==0.54.0",
 ]
 
 [project.optional-dependencies]
@@ -22,24 +24,34 @@ dev = [
 # Incluye dependencias transitivas de ejecucion y pruebas; excluye bs4,
 # pip y setuptools, que no son dependencias de la aplicacion.
 # Mantener las versiones directas sincronizadas con [project].
-# Instalacion desde la raiz: python -m pip install --group backend/pyproject.toml:local
+# Inventario de versiones. Para instalar con integridad usar requirements*.txt.
 [dependency-groups]
 local = [
+    "annotated-doc==0.0.6",
+    "annotated-types==0.8.0",
     "anyio==4.16.0",
     "beautifulsoup4==4.15.0",
     "certifi==2026.10.23",
+    "click==8.5.1",
     "colorama==0.4.6; sys_platform == 'win32'",
+    "fastapi==0.162.7",
     "h11==0.16.0",
     "httpcore==1.0.9",
     "httpx==0.28.1",
     "idna==3.20",
     "iniconfig==2.3.1",
+    "opentelemetry-api==1.45.2",
     "packaging==26.3",
     "pluggy==1.7.0",
+    "pydantic==2.14.3",
+    "pydantic-core==2.50.4",
     "Pygments==2.21.0",
     "pytest==9.2.0",
     "soupsieve==4.1",
+    "starlette==1.10.0",
+    "typing-inspection==0.4.5",
     "typing_extensions==4.16.0",
+    "uvicorn==0.54.0",
 ]
 
 # Estos pins no son un lock con hashes de distribuciones. Otras plataformas

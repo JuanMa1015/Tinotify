@@ -1,4 +1,142 @@
-# Infraestructura y cierre de la etapa 4A
+# Despliegue de la API minima e historial de infraestructura
+
+## 4B.2-A: API preparada para Render, sin desplegar
+
+La aplicación ASGI se importa como `tinotify.api:app` desde el paquete Python
+instalado. Solo publica `GET /health`, con HTTP 200 y `{"status":"ok"}`. Es una
+comprobación de disponibilidad del proceso, no de PostgreSQL, Supabase o SIGAC.
+No carga `.env`, no requiere secretos, no crea estado persistente y no inicia
+trabajos programados. No hay autenticación, endpoints de negocio ni conexión SQL.
+
+Después de revisar y fusionar el PR en `main`, crear manualmente un **Web
+Service** usando `JuanMa1015/Tinotify`. Estos son los valores exactos:
+
+| Campo | Valor |
+| --- | --- |
+| Name | `tinotify-api` |
+| Branch | `main` |
+| Root Directory | `backend` |
+| Runtime / Language | `Python 3` |
+| Instance Type | `Free` |
+| Health Check Path | `/health` |
+| Environment | `PYTHON_VERSION=3.11.18` |
+| Auto-Deploy | Desactivado; desplegar tras revisión explícita |
+
+Build Command (shell de Render, ejecutado dentro de `backend`):
+
+```sh
+python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check
+```
+
+Start Command:
+
+```sh
+python -m uvicorn tinotify.api:app --host 0.0.0.0 --port "$PORT" --workers 1
+```
+
+Render proporciona `PORT`; no fijarlo a 8000 ni pegar la sintaxis PowerShell
+`$env:PORT` en ese campo. `PYTHON_VERSION` es un valor público y debe coincidir
+con `backend/.python-version`. No añadir DSN, claves de Supabase, tokens ni
+credenciales de SIGAC: esta etapa no los consume. El build instala únicamente
+dependencias de ejecución y herramientas de construcción fijadas con hashes.
+`requirements-build.txt` instala el backend de build y sus transitivas como
+wheels verificadas antes de construir el código local. No instala pytest.
+
+`scripts/install_local.py` construye únicamente el paquete Tinotify de este
+checkout con `--no-index --no-deps --no-build-isolation`. La ausencia de aislamiento
+de build evita que pip cree otro entorno y descargue dependencias sin hashes;
+las herramientas ya están instaladas y fijadas. El script comprueba que se haya
+generado exactamente una wheel, calcula su SHA-256 e instala ese artefacto con
+`--no-index --no-deps --require-hashes --only-binary=:all:`. El manifiesto y la
+wheel son temporales, no se descargan de Internet y se eliminan al terminar.
+No se combinan fuentes locales con la resolución de dependencias externas.
+
+`render.yaml`, en la raíz, conserva la misma configuración como Blueprint
+opcional. Guardarlo en Git no crea un servicio. Crear o sincronizar un Blueprint
+sí puede desplegar: requiere aprobación y no se ejecuta en esta etapa. No hay
+comandos pre-deploy, migraciones ni recursos PostgreSQL en ese archivo.
+
+Después de un despliegue autorizado, usar la URL que asigne Render:
+
+```powershell
+# Sustituir el host por el mostrado por Render; no se ha reservado este nombre.
+Invoke-RestMethod -Uri 'https://HOST-ASIGNADO-POR-RENDER/health' -Method Get
+```
+
+La respuesta esperada contiene exclusivamente `status: ok`. `/docs`, `/redoc`,
+`/openapi.json`, `/expedientes`, `/usuarios` y `/sigac` devuelven 404. Este health
+check no demuestra que la integración de negocio esté lista.
+
+### Validación antes del despliegue
+
+Desde la raíz del repositorio, en un entorno Python 3.11 limpio:
+
+```powershell
+py -3.11 -m venv backend/.venv
+.\backend\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
+.\backend\.venv\Scripts\python.exe backend/scripts/install_local.py
+.\backend\.venv\Scripts\python.exe -m pip check
+.\backend\.venv\Scripts\python.exe -m pytest -v -p no:cacheprovider
+```
+
+El workflow `.github/workflows/backend-tests.yml` repite instalación, `pip check`
+y pytest desde la raíz en PR hacia `main` y push a `main`, con `python-version: "3.11"`
+en Linux y Windows: setup-python selecciona el parche compatible disponible en
+cada runner. Render mantiene el parche exacto 3.11.18; Windows no dispone de ese
+binario en setup-python. Sus permisos son solo de lectura y no recibe secretos ni ejecuta
+SQL, Supabase CLI o despliegues. SonarQube sigue siendo una comprobación separada;
+la ejecución de pytest no importa automáticamente cobertura en SonarQube.
+CI usa el mismo instalador local no editable que Render y comprueba que Uvicorn
+carga `tinotify.api:app`, sin abrir un puerto en el runner. No se omiten ni rebajan
+reglas de SonarQube para permitir la instalación.
+
+### Procedencia y actualización de los requisitos
+
+Los hashes corresponden a wheels no retiradas de las versiones fijadas en PyPI.
+Se descargaron los artefactos de `files.pythonhosted.org` por HTTPS y se comprobó
+su SHA-256 contra los metadatos oficiales de cada versión. Se autorizan wheels
+universales y las de CPython 3.11 para Windows x64 y Linux manylinux x86_64;
+otras arquitecturas requieren resolución, revisión y validación adicionales.
+El marcador de `colorama` conserva su instalación solo en Windows.
+
+No regenerar hashes en CI: el conjunto autorizado se revisa y versiona antes de
+instalarlo. Para actualizar una dependencia, resolver transitivas en un entorno
+limpio, descargar las wheels de las plataformas soportadas, calcular SHA-256 y
+contrastarlos con PyPI; actualizar juntos pins, hashes y el inventario del
+manifiesto, y repetir ambas ramas de CI. `pip --require-hashes` debe rechazar
+artefactos distintos o dependencias nuevas que no estén fijadas y verificadas.
+Los hashes no constituyen una firma del autor ni garantizan ausencia de fallos.
+La suite incluye una wheel completamente ficticia con hash incorrecto y comprueba
+que pip la rechaza en `--dry-run --no-index`, sin instalarla ni consultar la red.
+
+Starlette 1.10 conserva compatibilidad con HTTPX 0.28.1, pero avisa que su
+`TestClient` deprecará ese transporte en favor de HTTPX2. No se suprime el aviso
+ni se sustituye el cliente SIGAC en esta etapa; una actualización futura deberá
+revisar ambos contratos antes de cambiar esas dependencias.
+
+La suite verifica el ciclo ASGI, el contrato HTTP y un inicio en un proceso nuevo
+con directorio vacío y entorno mínimo, sin variables de credenciales ni imports
+del monitor, integración SIGAC o adaptador SQL. Las conexiones HTTP se simulan
+mediante `TestClient`. Esto no acredita un despliegue real ni prueba PostgreSQL.
+
+### Límites de Render Free
+
+Render Free suspende servicios tras 15 minutos sin tráfico; el siguiente acceso
+puede esperar aproximadamente un minuto al reactivarlos. El sistema de archivos
+es efímero y el plan tiene cuotas compartidas de horas, builds y transferencia.
+No usar pings artificiales para evitar la suspensión ni guardar JSON del monitor
+en ese servicio. Esta API mínima es para comprobación y desarrollo; no ofrece
+disponibilidad continua ni sincronización o avisos de fondo.
+
+Referencias: [FastAPI en Render](https://render.com/docs/deploy-fastapi),
+[Python](https://render.com/docs/python-version),
+[Free](https://render.com/docs/free),
+[Blueprint](https://render.com/docs/blueprint-spec).
+
+## Historial 4A
+
+Lo siguiente conserva la verificación histórica de infraestructura. No describe
+las capacidades de la API mínima ni afirma que 4B.1 se haya aplicado al remoto.
 
 ## Estado verificado el 12 de noviembre de 2026
 
