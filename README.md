@@ -22,15 +22,22 @@ servidor ejecutable ni una aplicación móvil.
 | Seleccionar rol | POST implementado; no acredita autenticación ni autorización |
 | Reconocer página y menú | Comprobaciones preliminares; devuelven `autenticada=False` |
 | Autenticación real con SIGAC | No implementada ni validada |
-| API FastAPI, SQLite/PostgreSQL y app Expo | Previstas, no implementadas |
+| PostgreSQL/Supabase | Infraestructura minima 4A aplicada y verificada; sin tablas de negocio ni adaptador Python |
+| API FastAPI y app Expo | Previstas, no implementadas |
 | Múltiples estudiantes | No soportados de forma segura actualmente |
 
-La suite actual contiene **241 pruebas: 54 originales y 187 adicionales**.
+La suite de esta rama contiene **281 pruebas: 54 originales y 227 adicionales**.
+Incluye 40 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
 Una expectativa original cambió para exigir avisos sin datos del expediente.
 Su aprobación no demuestra preparación
 para producción ni compatibilidad con SIGAC real. Los riesgos de aislamiento,
 concurrencia, identificación y persistencia siguen abiertos en
 [seguridad](docs/security.md).
+
+La [preparación 4B.1](docs/etapa-4b-1.md) contiene una migración propuesta de ocho
+tablas con acceso cerrado y scripts de integridad/concurrencia para revisión.
+No se ha aplicado ni probado contra PostgreSQL remoto. El parser aprobado en
+`526f01b` permanece en su rama independiente y no se fusiona en esta entrega.
 
 La [reconciliación de actuaciones](docs/reconciliacion.md) distingue primera
 observación, modificación confirmada y cambio ambiguo. Sin IDs estables no puede
@@ -133,8 +140,15 @@ tinotify/
 ├── docs/
 │   ├── architecture.md
 │   ├── contratos-identidad.md
+│   ├── deployment.md
 │   ├── reconciliacion.md
 │   └── security.md
+├── supabase/
+│   ├── config.toml
+│   ├── checks/                     # Consultas de inspeccion, sin DDL
+│   └── migrations/                 # 4A aplicada y registrada en Supabase
+├── package.json                    # Solo herramientas de desarrollo
+├── package-lock.json
 ├── .env.example
 ├── .gitignore
 ├── pytest.ini
@@ -145,6 +159,31 @@ La arquitectura actual y las siguientes etapas se describen en
 [arquitectura](docs/architecture.md). La app móvil aún no tiene carpeta ni código.
 
 ## Configuración y privacidad
+
+La etapa 4A incluye Supabase CLI **3.1.0**, fijado en `package.json` y
+`package-lock.json`. La migración `20261112050000` está aplicada una sola vez
+y fue verificada en Supabase el 12 de noviembre de 2026.
+No se requiere PostgreSQL local ni Docker. El proyecto remoto existente se
+destina exclusivamente a desarrollo con datos ficticios, aunque la CLI lo
+etiquete como `production`: esa etiqueta de la plataforma no autoriza datos
+reales ni lo convierte en el entorno de producción de Tinotify. La CLI está
+vinculada; se verificaron propietarios, roles, privilegios, ausencia de tablas,
+historial y dry-run sin migraciones pendientes. Los esquemas privados están
+excluidos de Exposed schemas, comprobado en Dashboard.
+No existe todavía un adaptador PostgreSQL.
+
+```powershell
+# Restaurar herramientas en otro equipo (descarga paquetes; requiere autorizacion).
+npm.cmd ci --no-audit --no-fund
+$env:SUPABASE_TELEMETRY_DISABLED='1'
+$env:DO_NOT_TRACK='1'
+npm.cmd exec --offline -- supabase --version
+```
+
+El [procedimiento de despliegue](docs/deployment.md) separa la vinculación, la
+revisión y la aplicación remota, que requieren aprobación. FastAPI se prevé en
+Render; la app nativa se distribuirá con Expo/EAS Build. Vercel queda reservado
+para una posible versión web. Ningún servicio se ha desplegado.
 
 `.env.example` contiene únicamente valores de demostración para una futura capa
 de configuración. **El código actual no carga `.env` ni consume esas variables**;

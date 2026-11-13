@@ -36,6 +36,18 @@ coverage/
 *.jks
 *.keystore
 
+# Supabase CLI: credenciales, vinculacion y estado local (v2/v3)
+.supabase/
+supabase/.temp/
+supabase/.branches/
+supabase/backups/
+.pgpass
+pgpass.conf
+.pg_service.conf
+pg_service.conf
+*.dump
+*.backup
+
 # Datos privados y sesiones
 datos_privados/
 casos_reales/

@@ -1,0 +1,18 @@
+# Configuracion minima de CLI 3.1.0. No configura el proyecto remoto.
+# Identificador local; no es una vinculacion ni una referencia de produccion.
+project_id = "tinotify"
+
+# No se requiere ni se inicia una pila local. No ejecutar config push.
+# app y app_private nunca se incorporan a los esquemas expuestos de la Data API.
+[api]
+enabled = false
+schemas = []
+extra_search_path = []
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
+sql_paths = []
