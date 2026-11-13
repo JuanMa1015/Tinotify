@@ -1,4 +1,110 @@
-# Infraestructura y cierre de la etapa 4A
+# Despliegue de la API minima e historial de infraestructura
+
+## 4B.2-A: API preparada para Render, sin desplegar
+
+La aplicación ASGI se importa como `tinotify.api:app` desde el paquete Python
+instalado. Solo publica `GET /health`, con HTTP 200 y `{"status":"ok"}`. Es una
+comprobación de disponibilidad del proceso, no de PostgreSQL, Supabase o SIGAC.
+No carga `.env`, no requiere secretos, no crea estado persistente y no inicia
+trabajos programados. No hay autenticación, endpoints de negocio ni conexión SQL.
+
+Después de revisar y fusionar el PR en `main`, crear manualmente un **Web
+Service** usando `JuanMa1015/Tinotify`. Estos son los valores exactos:
+
+| Campo | Valor |
+| --- | --- |
+| Name | `tinotify-api` |
+| Branch | `main` |
+| Root Directory | `backend` |
+| Runtime / Language | `Python 3` |
+| Instance Type | `Free` |
+| Health Check Path | `/health` |
+| Environment | `PYTHON_VERSION=3.11.18` |
+| Auto-Deploy | Desactivado; desplegar tras revisión explícita |
+
+Build Command (shell de Render, ejecutado dentro de `backend`):
+
+```sh
+python -m pip install -r requirements.txt && python -m pip install --no-deps . && python -m pip check
+```
+
+Start Command:
+
+```sh
+python -m uvicorn tinotify.api:app --host 0.0.0.0 --port "$PORT" --workers 1
+```
+
+Render proporciona `PORT`; no fijarlo a 8000 ni pegar la sintaxis PowerShell
+`$env:PORT` en ese campo. `PYTHON_VERSION` es un valor público y debe coincidir
+con `backend/.python-version`. No añadir DSN, claves de Supabase, tokens ni
+credenciales de SIGAC: esta etapa no los consume. El build instala únicamente
+dependencias de ejecución; las herramientas de construcción están fijadas en
+`pyproject.toml` y se preparan mediante aislamiento de build de pip.
+
+`render.yaml`, en la raíz, conserva la misma configuración como Blueprint
+opcional. Guardarlo en Git no crea un servicio. Crear o sincronizar un Blueprint
+sí puede desplegar: requiere aprobación y no se ejecuta en esta etapa. No hay
+comandos pre-deploy, migraciones ni recursos PostgreSQL en ese archivo.
+
+Después de un despliegue autorizado, usar la URL que asigne Render:
+
+```powershell
+# Sustituir el host por el mostrado por Render; no se ha reservado este nombre.
+Invoke-RestMethod -Uri 'https://HOST-ASIGNADO-POR-RENDER/health' -Method Get
+```
+
+La respuesta esperada contiene exclusivamente `status: ok`. `/docs`, `/redoc`,
+`/openapi.json`, `/expedientes`, `/usuarios` y `/sigac` devuelven 404. Este health
+check no demuestra que la integración de negocio esté lista.
+
+### Validación antes del despliegue
+
+Desde la raíz del repositorio, en un entorno Python 3.11 limpio:
+
+```powershell
+py -3.11 -m venv backend/.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+.\backend\.venv\Scripts\python.exe -m pip install --no-deps -e ./backend
+.\backend\.venv\Scripts\python.exe -m pip check
+.\backend\.venv\Scripts\python.exe -m pytest -v -p no:cacheprovider
+```
+
+El workflow `.github/workflows/backend-tests.yml` repite instalación, `pip check`
+y pytest desde la raíz en PR hacia `main` y push a `main`, con Python 3.11.18 en
+Linux y Windows. Sus permisos son solo de lectura y no recibe secretos ni ejecuta
+SQL, Supabase CLI o despliegues. SonarQube sigue siendo una comprobación separada;
+la ejecución de pytest no importa automáticamente cobertura en SonarQube.
+CI también construye e instala el paquete de forma no editable y comprueba que
+Uvicorn carga `tinotify.api:app`, sin abrir un puerto en el runner.
+
+Starlette 1.10 conserva compatibilidad con HTTPX 0.28.1, pero avisa que su
+`TestClient` deprecará ese transporte en favor de HTTPX2. No se suprime el aviso
+ni se sustituye el cliente SIGAC en esta etapa; una actualización futura deberá
+revisar ambos contratos antes de cambiar esas dependencias.
+
+La suite verifica el ciclo ASGI, el contrato HTTP y un inicio en un proceso nuevo
+con directorio vacío y entorno mínimo, sin variables de credenciales ni imports
+del monitor, integración SIGAC o adaptador SQL. Las conexiones HTTP se simulan
+mediante `TestClient`. Esto no acredita un despliegue real ni prueba PostgreSQL.
+
+### Límites de Render Free
+
+Render Free suspende servicios tras 15 minutos sin tráfico; el siguiente acceso
+puede esperar aproximadamente un minuto al reactivarlos. El sistema de archivos
+es efímero y el plan tiene cuotas compartidas de horas, builds y transferencia.
+No usar pings artificiales para evitar la suspensión ni guardar JSON del monitor
+en ese servicio. Esta API mínima es para comprobación y desarrollo; no ofrece
+disponibilidad continua ni sincronización o avisos de fondo.
+
+Referencias: [FastAPI en Render](https://render.com/docs/deploy-fastapi),
+[Python](https://render.com/docs/python-version),
+[Free](https://render.com/docs/free),
+[Blueprint](https://render.com/docs/blueprint-spec).
+
+## Historial 4A
+
+Lo siguiente conserva la verificación histórica de infraestructura. No describe
+las capacidades de la API mínima ni afirma que 4B.1 se haya aplicado al remoto.
 
 ## Estado verificado el 12 de noviembre de 2026
 

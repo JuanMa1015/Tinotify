@@ -8,8 +8,8 @@ pendientes. Este repositorio no acredita respaldo ni autorización institucional
 ## Estado actual
 
 La implementación es una biblioteca Python experimental instalable, organizada
-en `backend/src/tinotify`, con pruebas en `backend/tests`. No incluye todavía un
-servidor ejecutable ni una aplicación móvil.
+en `backend/src/tinotify`, con pruebas en `backend/tests`. Incluye una API mínima
+FastAPI importable como `tinotify.api:app`; la aplicación móvil sigue pendiente.
 
 | Capacidad | Estado |
 | --- | --- |
@@ -23,11 +23,12 @@ servidor ejecutable ni una aplicación móvil.
 | Reconocer página y menú | Comprobaciones preliminares; devuelven `autenticada=False` |
 | Autenticación real con SIGAC | No implementada ni validada |
 | PostgreSQL/Supabase | Infraestructura minima 4A aplicada y verificada; sin tablas de negocio ni adaptador Python |
-| API FastAPI y app Expo | Previstas, no implementadas |
+| API FastAPI | Solo `GET /health`; sin PostgreSQL, autenticación ni integración SIGAC |
+| App Expo | Prevista, no implementada |
 | Múltiples estudiantes | No soportados de forma segura actualmente |
 
-La suite de esta rama contiene **281 pruebas: 54 originales y 227 adicionales**.
-Incluye 40 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
+La suite contiene **298 pruebas: las 284 anteriores y 14 de API y dependencias**.
+Incluye 43 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
 Una expectativa original cambió para exigir avisos sin datos del expediente.
 Su aprobación no demuestra preparación
 para producción ni compatibilidad con SIGAC real. Los riesgos de aislamiento,
@@ -36,7 +37,8 @@ concurrencia, identificación y persistencia siguen abiertos en
 
 La [preparación 4B.1](docs/etapa-4b-1.md) contiene una migración propuesta de ocho
 tablas con acceso cerrado y scripts de integridad/concurrencia para revisión.
-No se ha aplicado ni probado contra PostgreSQL remoto. El parser aprobado en
+Se validó en PostgreSQL 17 aislado; no se ha aplicado a Supabase remoto.
+La API no utiliza estas tablas. El parser aprobado en
 `526f01b` permanece en su rama independiente y no se fusiona en esta entrega.
 
 La [reconciliación de actuaciones](docs/reconciliacion.md) distingue primera
@@ -52,20 +54,21 @@ elevar IDs antiguos. Véase [contratos de identidad](docs/contratos-identidad.md
 ## Requisitos y dependencias
 
 - Python 3.11; entorno verificado con CPython 3.11.9 en Windows.
-- Ejecución: Beautiful Soup y HTTPX.
+- Ejecución: Beautiful Soup, HTTPX, FastAPI 0.162.7 y Uvicorn 0.54.0.
 - Desarrollo: pytest.
 - Para el comando de instalación por grupos: pip con soporte para `--group`
   (verificado localmente con pip 26.3).
 
 [backend/pyproject.toml](backend/pyproject.toml) declara las dependencias directas
 y el grupo `local`, con versiones exactas de sus dependencias de ejecución y
-pruebas observadas en el entorno auditado. No incluye FastAPI, Expo ni el paquete
+pruebas observadas en el entorno auditado. No incluye Expo ni el paquete
 intermediario redundante `bs4`. El entorno existente puede conservar este último;
 no es necesario desinstalarlo para ejecutar las pruebas.
 
-Los pins facilitan repetir el entorno verificado, pero no son un lock con hashes
-ni garantizan idéntica resolución en otras plataformas. No se consultaron bases
-externas de vulnerabilidades. El empaquetado usa `setuptools==65.5.0` y
+`backend/requirements.txt` fija la resolución de ejecución y
+`backend/requirements-dev.txt` añade pytest y sus dependencias. Se comprueba su
+correspondencia con el manifiesto. Los pins no incluyen hashes de distribuciones
+ni sustituyen una auditoría de vulnerabilidades. El empaquetado usa `setuptools==65.5.0` y
 `wheel==0.45.1` como herramientas de construcción; no son dependencias de ejecución.
 La distribución se llama `tinotify-backend` y el paquete importable es `tinotify`.
 
@@ -77,8 +80,8 @@ antes de ejecutar pytest. Si ya existe `.venv`, omitir su creación:
 ```powershell
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip --version
-# Requiere que pip admita --group. La instalacion necesita acceso al indice.
-.\.venv\Scripts\python.exe -m pip install --group backend/pyproject.toml:local
+# La instalacion necesita acceso al indice.
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .\backend
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m pytest -v
@@ -87,12 +90,25 @@ py -3.11 -m venv .venv
 La instalación editable puede descargar las herramientas de construcción fijadas
 en el manifiesto. Si ya están disponibles en el entorno, puede añadirse
 `--no-build-isolation --no-index` para construir sin acceder al índice. La
-instalación por grupos requiere una versión de pip que admita `--group`.
+instalación alternativa por grupos requiere pip con soporte para `--group`.
 
 Las pruebas usan datos ficticios, transportes HTTP simulados y directorios
 temporales para comprobar persistencia. No necesitan credenciales ni acceso a
 SIGAC. `pytest.ini` permite ejecutarlas desde la raíz con importaciones del
 paquete instalado, sin configurar `PYTHONPATH` ni modificar `sys.path`.
+
+Para iniciar únicamente la API local, desde la raíz:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn tinotify.api:app --host 127.0.0.1 --port 8000
+```
+
+`GET http://127.0.0.1:8000/health` devuelve `200` y `{"status":"ok"}`. Comprueba
+solo que el proceso responde; no acredita acceso a PostgreSQL, Supabase ni SIGAC.
+No necesita `.env`. Las rutas de expedientes/usuarios, OpenAPI y las páginas de
+documentación HTTP no están habilitadas. El workflow `Pruebas backend` ejecuta
+pytest en PR hacia `main` y en cada push a `main`, con Python 3.11 en Linux y Windows.
+No aplica migraciones, no despliega y no recibe secretos de aplicación.
 
 La validación inicial de la migración utilizó entornos temporales. Al cerrar la
 etapa 2 se instaló también Tinotify en modo editable en el `.venv` principal,
@@ -133,9 +149,9 @@ tinotify/
 │   │   ├── services/                 # sigac_service.py y reconciliacion.py
 │   │   ├── integrations/sigac/       # Cliente, roles, menú y sesión
 │   │   ├── persistence/monitor.py
-│   │   └── api/                      # Paquete vacío; sin FastAPI
+│   │   └── api/                      # app ASGI; solo GET /health
 │   └── tests/
-│       ├── test_*.py                 # Dieciséis archivos, 241 pruebas
+│       ├── test_*.py                 # Suite backend; incluye contrato HTTP
 │       └── fixtures/caso_prueba.html
 ├── docs/
 │   ├── architecture.md
@@ -181,8 +197,9 @@ npm.cmd exec --offline -- supabase --version
 ```
 
 El [procedimiento de despliegue](docs/deployment.md) separa la vinculación, la
-revisión y la aplicación remota, que requieren aprobación. FastAPI se prevé en
-Render; la app nativa se distribuirá con Expo/EAS Build. Vercel queda reservado
+revisión y la aplicación remota, que requieren aprobación. La API mínima está
+preparada para Render Free mediante `render.yaml`; la app nativa se distribuirá
+con Expo/EAS Build. Vercel queda reservado
 para una posible versión web. Ningún servicio se ha desplegado.
 
 `.env.example` contiene únicamente valores de demostración para una futura capa
