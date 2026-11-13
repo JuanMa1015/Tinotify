@@ -30,7 +30,7 @@ BEGIN
         IF EXISTS (
             SELECT 1 FROM pg_catalog.pg_attribute a
             JOIN pg_catalog.pg_class c ON c.oid=a.attrelid
-            CROSS JOIN LATERAL pg_catalog.aclexplode(coalesce(a.attacl,ARRAY[]::aclitem[])) p
+            CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) p
             WHERE a.attrelid=t AND a.attnum>0 AND NOT a.attisdropped AND p.grantee<>c.relowner
         ) THEN
             RAISE EXCEPTION 'ACL de columna residual en %',t;
