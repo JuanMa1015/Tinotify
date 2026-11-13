@@ -25,7 +25,7 @@ Service** usando `JuanMa1015/Tinotify`. Estos son los valores exactos:
 Build Command (shell de Render, ejecutado dentro de `backend`):
 
 ```sh
-python -m pip install -r requirements.txt && python -m pip install --no-deps . && python -m pip check
+python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check
 ```
 
 Start Command:
@@ -38,8 +38,18 @@ Render proporciona `PORT`; no fijarlo a 8000 ni pegar la sintaxis PowerShell
 `$env:PORT` en ese campo. `PYTHON_VERSION` es un valor público y debe coincidir
 con `backend/.python-version`. No añadir DSN, claves de Supabase, tokens ni
 credenciales de SIGAC: esta etapa no los consume. El build instala únicamente
-dependencias de ejecución; las herramientas de construcción están fijadas en
-`pyproject.toml` y se preparan mediante aislamiento de build de pip.
+dependencias de ejecución y herramientas de construcción fijadas con hashes.
+`requirements-build.txt` instala el backend de build y sus transitivas como
+wheels verificadas antes de construir el código local. No instala pytest.
+
+`scripts/install_local.py` construye únicamente el paquete Tinotify de este
+checkout con `--no-index --no-deps --no-build-isolation`. La ausencia de aislamiento
+de build evita que pip cree otro entorno y descargue dependencias sin hashes;
+las herramientas ya están instaladas y fijadas. El script comprueba que se haya
+generado exactamente una wheel, calcula su SHA-256 e instala ese artefacto con
+`--no-index --no-deps --require-hashes --only-binary=:all:`. El manifiesto y la
+wheel son temporales, no se descargan de Internet y se eliminan al terminar.
+No se combinan fuentes locales con la resolución de dependencias externas.
 
 `render.yaml`, en la raíz, conserva la misma configuración como Blueprint
 opcional. Guardarlo en Git no crea un servicio. Crear o sincronizar un Blueprint
@@ -63,19 +73,41 @@ Desde la raíz del repositorio, en un entorno Python 3.11 limpio:
 
 ```powershell
 py -3.11 -m venv backend/.venv
-.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
-.\backend\.venv\Scripts\python.exe -m pip install --no-deps -e ./backend
+.\backend\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
+.\backend\.venv\Scripts\python.exe backend/scripts/install_local.py
 .\backend\.venv\Scripts\python.exe -m pip check
 .\backend\.venv\Scripts\python.exe -m pytest -v -p no:cacheprovider
 ```
 
 El workflow `.github/workflows/backend-tests.yml` repite instalación, `pip check`
-y pytest desde la raíz en PR hacia `main` y push a `main`, con Python 3.11.18 en
-Linux y Windows. Sus permisos son solo de lectura y no recibe secretos ni ejecuta
+y pytest desde la raíz en PR hacia `main` y push a `main`, con `python-version: "3.11"`
+en Linux y Windows: setup-python selecciona el parche compatible disponible en
+cada runner. Render mantiene el parche exacto 3.11.18; Windows no dispone de ese
+binario en setup-python. Sus permisos son solo de lectura y no recibe secretos ni ejecuta
 SQL, Supabase CLI o despliegues. SonarQube sigue siendo una comprobación separada;
 la ejecución de pytest no importa automáticamente cobertura en SonarQube.
-CI también construye e instala el paquete de forma no editable y comprueba que
-Uvicorn carga `tinotify.api:app`, sin abrir un puerto en el runner.
+CI usa el mismo instalador local no editable que Render y comprueba que Uvicorn
+carga `tinotify.api:app`, sin abrir un puerto en el runner. No se omiten ni rebajan
+reglas de SonarQube para permitir la instalación.
+
+### Procedencia y actualización de los requisitos
+
+Los hashes corresponden a wheels no retiradas de las versiones fijadas en PyPI.
+Se descargaron los artefactos de `files.pythonhosted.org` por HTTPS y se comprobó
+su SHA-256 contra los metadatos oficiales de cada versión. Se autorizan wheels
+universales y las de CPython 3.11 para Windows x64 y Linux manylinux x86_64;
+otras arquitecturas requieren resolución, revisión y validación adicionales.
+El marcador de `colorama` conserva su instalación solo en Windows.
+
+No regenerar hashes en CI: el conjunto autorizado se revisa y versiona antes de
+instalarlo. Para actualizar una dependencia, resolver transitivas en un entorno
+limpio, descargar las wheels de las plataformas soportadas, calcular SHA-256 y
+contrastarlos con PyPI; actualizar juntos pins, hashes y el inventario del
+manifiesto, y repetir ambas ramas de CI. `pip --require-hashes` debe rechazar
+artefactos distintos o dependencias nuevas que no estén fijadas y verificadas.
+Los hashes no constituyen una firma del autor ni garantizan ausencia de fallos.
+La suite incluye una wheel completamente ficticia con hash incorrecto y comprueba
+que pip la rechaza en `--dry-run --no-index`, sin instalarla ni consultar la red.
 
 Starlette 1.10 conserva compatibilidad con HTTPX 0.28.1, pero avisa que su
 `TestClient` deprecará ese transporte en favor de HTTPX2. No se suprime el aviso

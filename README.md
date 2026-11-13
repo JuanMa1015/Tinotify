@@ -27,7 +27,7 @@ FastAPI importable como `tinotify.api:app`; la aplicación móvil sigue pendient
 | App Expo | Prevista, no implementada |
 | Múltiples estudiantes | No soportados de forma segura actualmente |
 
-La suite contiene **298 pruebas: las 284 anteriores y 14 de API y dependencias**.
+La suite contiene **303 pruebas: las 284 anteriores y 19 de API y dependencias**.
 Incluye 43 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
 Una expectativa original cambió para exigir avisos sin datos del expediente.
 Su aprobación no demuestra preparación
@@ -67,9 +67,11 @@ no es necesario desinstalarlo para ejecutar las pruebas.
 
 `backend/requirements.txt` fija la resolución de ejecución y
 `backend/requirements-dev.txt` añade pytest y sus dependencias. Se comprueba su
-correspondencia con el manifiesto. Los pins no incluyen hashes de distribuciones
-ni sustituyen una auditoría de vulnerabilidades. El empaquetado usa `setuptools==65.5.0` y
-`wheel==0.45.1` como herramientas de construcción; no son dependencias de ejecución.
+correspondencia con el manifiesto. Los tres archivos `requirements*.txt` contienen
+SHA-256 verificados para wheels de CPython 3.11 en Linux x86_64 y Windows x64.
+`requirements-build.txt` fija `setuptools==84.2.1`, `wheel==0.48.0` y su dependencia
+`packaging`; no son dependencias de la aplicación. Los hashes verifican artefactos,
+pero no sustituyen una auditoría de vulnerabilidades ni certifican su autoría.
 La distribución se llama `tinotify-backend` y el paquete importable es `tinotify`.
 
 ## Desarrollo local
@@ -81,16 +83,19 @@ antes de ejecutar pytest. Si ya existe `.venv`, omitir su creación:
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip --version
 # La instalacion necesita acceso al indice.
-.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
-.\.venv\Scripts\python.exe -m pip install --no-deps -e .\backend
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
+.\.venv\Scripts\python.exe backend/scripts/install_local.py
 .\.venv\Scripts\python.exe -m pip check
 .\.venv\Scripts\python.exe -m pytest -v
 ```
 
-La instalación editable puede descargar las herramientas de construcción fijadas
-en el manifiesto. Si ya están disponibles en el entorno, puede añadirse
-`--no-build-isolation --no-index` para construir sin acceder al índice. La
-instalación alternativa por grupos requiere pip con soporte para `--group`.
+La instalación externa verifica hashes y rechaza distribuciones fuente. El script
+local construye solo Tinotify sin índice ni resolución de dependencias, usando las
+herramientas ya verificadas; instala la wheel no editable mediante un manifiesto
+temporal con SHA-256 y sin red. Sus archivos temporales se eliminan al terminar.
+Repetir el script después de editar código para actualizar el paquete instalado.
+El grupo `local` conserva un inventario de versiones; no usarlo como sustituto
+de la instalación con hashes en CI o Render.
 
 Las pruebas usan datos ficticios, transportes HTTP simulados y directorios
 temporales para comprobar persistencia. No necesitan credenciales ni acceso a
@@ -122,10 +127,10 @@ antes de ejecutar las nuevas pruebas.
 Para construir una wheel con el entorno preparado:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip wheel --no-deps --wheel-dir dist .\backend
+.\.venv\Scripts\python.exe -m pip wheel --no-index --no-deps --no-build-isolation --wheel-dir dist .\backend
 ```
 
-Este comando puede preparar herramientas en un entorno de construcción aislado.
+Este comando requiere las herramientas de `requirements-build.txt` ya instaladas.
 La wheel solo contiene el paquete `tinotify` y sus metadatos; las pruebas y el
 HTML ficticio permanecen en el repositorio y no forman parte de la distribución.
 

@@ -1,6 +1,6 @@
 # Construccion y modo editable con herramientas de versiones explicitas.
 [build-system]
-requires = ["setuptools==65.5.0", "wheel==0.45.1"]
+requires = ["setuptools==84.2.1", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -24,7 +24,7 @@ dev = [
 # Incluye dependencias transitivas de ejecucion y pruebas; excluye bs4,
 # pip y setuptools, que no son dependencias de la aplicacion.
 # Mantener las versiones directas sincronizadas con [project].
-# Instalacion desde la raiz: python -m pip install --group backend/pyproject.toml:local
+# Inventario de versiones. Para instalar con integridad usar requirements*.txt.
 [dependency-groups]
 local = [
     "annotated-doc==0.0.6",

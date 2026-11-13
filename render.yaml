@@ -7,7 +7,7 @@ services:
     branch: main
     rootDir: backend
     autoDeployTrigger: "off"
-    buildCommand: python -m pip install -r requirements.txt && python -m pip install --no-deps . && python -m pip check
+    buildCommand: python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check
     startCommand: python -m uvicorn tinotify.api:app --host 0.0.0.0 --port "$PORT" --workers 1
     healthCheckPath: /health
     envVars:
