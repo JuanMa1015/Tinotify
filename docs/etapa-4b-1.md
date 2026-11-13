@@ -161,6 +161,14 @@ que requieren funciones/políticas reales de 4B.2.
 
 Para concurrencia (solo con aprobación adicional de escrituras confirmadas):
 
+Conservar la carpeta `supabase/tests/helpers/` junto a los scripts A/B al
+copiarlos al entorno de pruebas. Ambos incluyen `helpers/4b1_validar_fixture.sql`
+mediante `\ir`, que resuelve la ruta respecto al script, usando `psql -X -f`.
+El helper configura y valida el recibo dentro de la transacción del llamador;
+no abre ni confirma transacciones y no se ejecuta por separado. Si falta, no
+continuar el ensayo: `ON_ERROR_STOP` detiene el script. Las guardas estáticas
+comparan el helper y cada script expandido con la secuencia original de `0a2f1b4`.
+
 1. Generar un UUID v4 NUEVO localmente (PowerShell: [guid]::NewGuid()). Pasarlo
    como -v run_id=... a preparar.sql. El INSERT falla ante cualquier colisión;
    nunca reutiliza una fila. Guardar el recibo run_id + fixture_creado_en SOLO

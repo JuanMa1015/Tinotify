@@ -37,7 +37,8 @@ def cuerpo(tabla):
 def test_solo_ocho_tablas_y_4a_inmutable():
     assert set(re.findall(r'CREATE TABLE ([a-z_.]+)', CODE)) == TABLES
     original = ROOT / 'supabase/migrations/20261112050000_preparar_esquemas_privados.sql'
-    assert hashlib.sha256(original.read_bytes()).hexdigest() == '777b0b12b445a00eb31cd1c54931e35b0f31b8e6d8f81bb23dc9812982e2fba8'
+    # Git guarda LF; el checkout Windows puede usar CRLF sin cambiar el SQL.
+    assert hashlib.sha256(original.read_bytes().replace(b'\r\n', b'\n')).hexdigest() == '777b0b12b445a00eb31cd1c54931e35b0f31b8e6d8f81bb23dc9812982e2fba8'
     assert MIGRATION.name[:14] > original.name[:14]
 
 
@@ -270,3 +271,29 @@ def test_concurrencia_exige_recibo_y_sqlstate_concreto():
     assert limpiar.index('FOR UPDATE NOWAIT') < limpiar.index('DELETE FROM')
     assert "'4b1c0000-0000-4000-8000-000000000001'" not in limpiar
     assert not re.search(r'^\s*(?:GRANT|ALTER ROLE|SET ROLE)\b', preparar+b+limpiar, re.M)
+
+
+def test_helper_concurrencia_conserva_validacion_original():
+    helper = ROOT/'supabase/tests/helpers/4b1_validar_fixture.sql'
+    # Lectura obligatoria: falla si falta el archivo. Hash del bloque 7-19 de
+    # ambos scripts en 0a2f1b4, con saltos LF; detecta cambios en la guardia.
+    sql = helper.read_text(encoding='utf-8')
+    assert hashlib.sha256(sql.encode('utf-8')).hexdigest() == (
+        '4039855ddf4c89678e53831c3b8b18591ba16184c3d583b2ce80a47be7966f4e'
+    )
+
+
+@pytest.mark.parametrize('sesion,huella_original', [
+    ('a', 'b0a67d2595da0d266a17c248b19b6c97e0f52e05466a9cf2fc450c5c675121c4'),
+    ('b', '9fd559114d932d8e648326fa2aba05cd24d27525be927cb00184e0297015a932'),
+])
+def test_concurrencia_expandida_equivale_al_script_original(sesion, huella_original):
+    carpeta = ROOT/'supabase/tests'
+    sql = (carpeta/f'4b1_concurrencia_{sesion}.sql').read_text(encoding='utf-8')
+    inclusion = '\\ir helpers/4b1_validar_fixture.sql\n'
+    assert sql.count(inclusion) == 1
+    helper = (carpeta/'helpers/4b1_validar_fixture.sql').read_text(encoding='utf-8')
+    # Expansión estática, no ejecución SQL. Preserva orden, límites de
+    # transacción y diferencias A/B contra la secuencia aprobada en 0a2f1b4.
+    expandido = sql.replace(inclusion, helper)
+    assert hashlib.sha256(expandido.encode('utf-8')).hexdigest() == huella_original
