@@ -25,12 +25,14 @@ def test_inventario_con_rol_sin_acceso_a_datos_y_transaccion_read_only(postgres_
             assert datos["catalogo"]["tablas"]==8 and datos["catalogo"]["funciones"]==10
             assert datos["catalogo"]["objetos_ajenos"]==0
             assert datos["privilegios_directos_de_cliente"]==[]
-            assert datos["acl_columnas_no_propietario"]==2
+            # 4B.4-A agrega UPDATE(id) interno para bloquear solo sus perfiles.
+            assert datos["acl_columnas_no_propietario"]==3
             assert all(f["rol"] not in ("anon","authenticated","service_role") for f in datos["funciones_acceso_efectivo"])
             assert datos["clientes_pueden_asumir_propietarios"]==[]
             assert datos["auth_id_referenciable"]
             assert not datos["historial"]["existe"]
-            assert len(datos["politicas"])==25
+            # Las 25 originales y 17 politicas exclusivas del propietario fixture.
+            assert len(datos["politicas"])==42
             for funcion in datos["funciones"]:
                 assert funcion["propietario_correcto"] and funcion["security_correcta"]
                 assert funcion["search_path_fijo"] and not funcion["public_execute"]

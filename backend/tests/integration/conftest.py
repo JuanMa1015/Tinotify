@@ -87,28 +87,28 @@ def postgres_aislado(tmp_path_factory):
             # OID bootstrap debe conservar SUPERUSER. postgres es aqui un rol
             # secundario desechable, que SI puede probarse sin ese atributo.
             bootstrap.execute(sql.SQL("CREATE ROLE postgres LOGIN SUPERUSER CREATEDB CREATEROLE BYPASSRLS REPLICATION PASSWORD {}").format(sql.Literal(password)))
+            # El bootstrap es dueno de esta base desechable. Emular el CREATE
+            # de postgres observado en Supabase; no concederlo a los servicios.
+            bootstrap.execute("GRANT CREATE ON DATABASE postgres TO postgres")
         admin = psycopg.connect(**opciones,autocommit=True)
         with admin:
             admin.execute("CREATE SCHEMA auth; CREATE TABLE auth.users(id uuid PRIMARY KEY); CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS")
             root = Path(__file__).resolve().parents[3]
-            for migracion in sorted((root/"supabase/migrations").glob("*.sql")):
-                if migracion.name.startswith("20261114010000_"):
-                    # Emular administrador Supabase NOSUPERUSER. El harness
-                    # existe solo en este contenedor para restaurar el fixture.
-                    with psycopg.connect(**{**opciones,"user":"fixture_harness"},autocommit=True) as harness:
-                        harness.execute("ALTER ROLE postgres NOSUPERUSER")
-                        try:
-                            assert not admin.execute("SELECT rolsuper FROM pg_roles WHERE rolname=current_user").fetchone()[0]
-                            admin.execute(migracion.read_text(encoding="utf-8"))
-                            assert not admin.execute("""SELECT EXISTS (
-                                SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid
-                                WHERE r.rolname IN ('tinotify_guard_reader','tinotify_state_writer')
-                                AND (m.inherit_option OR m.set_option))""").fetchone()[0]
-                        finally:
-                            admin.rollback()
-                            harness.execute("ALTER ROLE postgres SUPERUSER")
-                else:
-                    admin.execute(migracion.read_text(encoding="utf-8"))
+            # Todas las migraciones con el mismo contexto NOSUPERUSER: tambien
+            # 4A necesita reproducir sus membresias ADMIN sin SET/INHERIT.
+            with psycopg.connect(**{**opciones,"user":"fixture_harness"},autocommit=True) as harness:
+                harness.execute("ALTER ROLE postgres NOSUPERUSER")
+                try:
+                    assert not admin.execute("SELECT rolsuper FROM pg_roles WHERE rolname=current_user").fetchone()[0]
+                    for migracion in sorted((root/"supabase/migrations").glob("*.sql")):
+                        admin.execute(migracion.read_text(encoding="utf-8"))
+                    assert not admin.execute("""SELECT EXISTS (
+                        SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid
+                        WHERE r.rolname IN ('tinotify_guard_reader','tinotify_state_writer','tinotify_fixture_owner')
+                        AND (m.inherit_option OR m.set_option))""").fetchone()[0]
+                finally:
+                    admin.rollback()
+                    harness.execute("ALTER ROLE postgres SUPERUSER")
             roles = {}
             for capacidad in ("api","sync","notifications"):
                 rol = "fixture_"+capacidad

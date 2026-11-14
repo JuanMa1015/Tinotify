@@ -1,5 +1,9 @@
 # 4B.3: auditoria de compatibilidad y aplicacion controlada
 
+Para la cuarta migracion propuesta, usar el [inventario 4B.4-A](fixtures-inertes-4b4a.md).
+La consulta de historial ahora reconoce cuatro versiones; los resultados y
+matrices de tres versiones descritos abajo son el registro historico de 4B.3.
+
 La [auditoria inicial 4B.4](validacion-remota-4b4.md) confirma que falta un ciclo
 de vida de fixtures remotos y documenta limites de este inventario para comparar
 esquemas completos. No se ha implementado ni ejecutado un harness remoto.

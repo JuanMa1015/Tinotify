@@ -7,7 +7,7 @@ import pytest
 
 
 CHECKS = Path(__file__).resolve().parents[2]/"supabase/checks"
-CONSULTAS = ("4b3_preflight.sql", "4b3_historial.sql")
+CONSULTAS = ("4b3_preflight.sql", "4b3_historial.sql", "4b4a_inventario.sql")
 FUNCIONES = {
     "jsonb_build_object", "jsonb_agg", "to_jsonb", "to_regrole", "to_regclass",
     "to_regnamespace", "to_regprocedure", "replace", "oidvectortypes",
@@ -16,12 +16,15 @@ FUNCIONES = {
     "has_language_privilege", "pg_has_role", "current_setting", "encode", "sha256", "convert_to",
     "pg_get_indexdef", "pg_get_functiondef", "pg_get_constraintdef", "pg_get_expr",
     "unnest", "count", "sum", "current_database",
+    "format_type", "pg_get_triggerdef",
 }
 
 
 def comprobar_consulta(texto):
     # Estos scripts no admiten bloques, dollar quotes, identificadores entre
     # comillas ni comandos psql. Evita ocultar una segunda sentencia al revisar.
+    # Solo el nombre builtin calificado de la collation C admite comillas.
+    texto=texto.replace('pg_catalog."C"','pg_catalog.C')
     assert not re.search(r'/\*|\*/|\$|"|^\s*\\', texto, re.M)
     codigo = re.sub(r"--[^\n]*|'(?:''|[^'])*'", " ", texto)
     assert codigo.strip().startswith("WITH ")
@@ -34,6 +37,7 @@ def comprobar_consulta(texto):
     assert sin_esquema <= {
         "as","exists","values","coalesce","and","any","in","on","select","when","where",
         "previstas","funciones_esperadas","r","roles_esperados","tablas",
+        "objetivos","firmas","nombres_roles","permisos","x",
     }
     fuentes=re.findall(r"\b(?:FROM|JOIN)\s+([a-z_][a-z_0-9.]+)",codigo,re.I)
     assert all("." not in f or f.startswith("pg_catalog.") or f=="supabase_migrations.schema_migrations" for f in fuentes)
