@@ -73,6 +73,30 @@ def provisionar(control,identidad,credencial):
     return control.llamar("provisionar",identidad,credencial,2,2,"0"*64)
 
 
+def esperar_bloqueo(admin,pid,minimo=1):
+    limite=time.monotonic()+5
+    while True:
+        admin.execute("SELECT pg_stat_clear_snapshot()")
+        cantidad=admin.execute("""WITH RECURSIVE bloqueados(pid) AS (
+            SELECT pid FROM pg_stat_activity WHERE %s=ANY(pg_blocking_pids(pid))
+            UNION
+            SELECT a.pid FROM pg_stat_activity a JOIN bloqueados b
+                ON b.pid=ANY(pg_blocking_pids(a.pid)))
+            SELECT count(*) FROM pg_stat_activity a JOIN bloqueados b USING(pid)
+            WHERE a.application_name='tinotify-fixture-test' AND a.wait_event_type='Lock'""",(pid,)).fetchone()[0]
+        if cantidad>=minimo:
+            return
+        assert time.monotonic()<limite, "No se observo la espera de bloqueo requerida"
+        time.sleep(.02)
+
+
+def expirar(admin,identidad):
+    # Exclusivamente en el contenedor desechable, nunca en Supabase.
+    admin.execute("""UPDATE app_fixture.ensayos
+        SET creado_en=clock_timestamp()-interval '2 minutes',vence_en=clock_timestamp()-interval '1 minute'
+        WHERE id=%s""",(identidad,))
+
+
 def test_cerrado_por_defecto_y_control_sin_dml(postgres_aislado,roles_control):
     admin,_,_=postgres_aislado
     assert not admin.execute("SELECT habilitado FROM app_fixture.entorno WHERE id").fetchone()[0]
@@ -102,6 +126,62 @@ def test_ciclo_inerte_idempotencia_y_recibos(controles,postgres_aislado):
     assert primero["estado"]=="limpio" and primero["perfiles_restantes"]==0
     assert UUID(c.llamar("registrar",clave,credencial,60)["id"])==identidad
     with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState): provisionar(c,identidad,credencial)
+
+
+def test_rls_rechaza_estudiante_sin_pertenencia(postgres_aislado):
+    admin,_,_=postgres_aislado
+    estudiante=uuid4()
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with admin.transaction():
+            # Sonda del propietario interno, sin conceder membresias a clientes.
+            admin.execute("SET LOCAL ROLE tinotify_fixture_owner")
+            admin.execute("INSERT INTO app.estudiantes(id,auth_subject,estado) VALUES(%s,NULL,'pendiente')",(estudiante,))
+    assert admin.execute("SELECT count(*) FROM app.estudiantes WHERE id=%s",(estudiante,)).fetchone()[0]==0
+
+
+@pytest.mark.parametrize("crear_estudiante",[False,True])
+def test_fk_diferidas_rechazan_pertenencia_incompleta_al_commit(controles,postgres_aislado,crear_estudiante):
+    identidad,_,_=controles["a"].registrar()
+    estudiante,cabecera=uuid4(),uuid4()
+    admin,_,_=postgres_aislado
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        with admin.transaction():
+            admin.execute("SET LOCAL ROLE tinotify_fixture_owner")
+            admin.execute("INSERT INTO app_fixture.perfiles VALUES(%s,%s,%s,%s)",
+                          (identidad,estudiante,cabecera,[uuid4()]))
+            if crear_estudiante:
+                admin.execute("INSERT INTO app.estudiantes(id,auth_subject,estado) VALUES(%s,NULL,'pendiente')",(estudiante,))
+            # Las sentencias anteriores pasan; la falta de padres falla al COMMIT.
+            assert admin.execute("SELECT count(*) FROM app_fixture.perfiles WHERE estudiante_id=%s",(estudiante,)).fetchone()[0]==1
+    assert admin.execute("SELECT count(*) FROM app_fixture.perfiles WHERE estudiante_id=%s",(estudiante,)).fetchone()[0]==0
+    assert admin.execute("SELECT count(*) FROM app.estudiantes WHERE id=%s",(estudiante,)).fetchone()[0]==0
+
+
+def test_pertenencia_no_admite_update_del_propietario_interno(controles,postgres_aislado):
+    c=controles["a"]
+    identidad,credencial,_=c.registrar()
+    provisionar(c,identidad,credencial)
+    admin,_,_=postgres_aislado
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with admin.transaction():
+            admin.execute("SET LOCAL ROLE tinotify_fixture_owner")
+            admin.execute("UPDATE app_fixture.perfiles SET estado_id=%s WHERE ensayo_id=%s",(uuid4(),identidad))
+    assert c.llamar("consultar",identidad,credencial)["perfiles_restantes"]==2
+
+
+def test_pertenencia_previa_confirma_con_ambas_fk_satisfechas(controles,postgres_aislado):
+    c=controles["a"]
+    identidad,credencial,_=c.registrar()
+    admin,_,_=postgres_aislado
+    diferidas=admin.execute("""SELECT condeferrable,condeferred FROM pg_constraint
+        WHERE conrelid='app_fixture.perfiles'::regclass AND contype='f'
+        AND confrelid IN ('app.estudiantes'::regclass,'app.estados_reconciliacion'::regclass)""").fetchall()
+    assert diferidas==[(True,True)]*2
+    with psycopg.connect(c.dsn,autocommit=True) as conexion:
+        with conexion.transaction():
+            ejecutar(conexion,"provisionar",identidad,credencial,2,2,"0"*64)
+            conexion.execute("SET CONSTRAINTS ALL IMMEDIATE")
+    assert c.llamar("consultar",identidad,credencial)["perfiles_restantes"]==2
 
 
 def test_no_adopta_ids_ajenos_y_no_borra_otro_ensayo(controles,entorno_pg):
@@ -151,6 +231,86 @@ def test_cuota_concurrente_no_se_sobrepasa(controles):
     with ThreadPoolExecutor(max_workers=2) as workers:
         resultados=list(workers.map(lambda _:crear(),range(2)))
     assert sum(resultados)==1
+
+
+def test_registro_concurrente_misma_clave_es_un_solo_recibo(controles,postgres_aislado):
+    c=controles["a"]
+    clave,credencial=uuid4(),secrets.token_hex(32)
+    admin,_,_=postgres_aislado
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        with admin.transaction():
+            admin.execute("SELECT id FROM app_fixture.entorno WHERE id FOR UPDATE")
+            pid=admin.execute("SELECT pg_backend_pid()").fetchone()[0]
+            trabajos=[workers.submit(c.registrar,clave,credencial) for _ in range(2)]
+            esperar_bloqueo(admin,pid,minimo=2)
+        resultados=[trabajo.result(timeout=10) for trabajo in trabajos]
+    assert resultados[0]==resultados[1]
+    assert admin.execute("SELECT count(*) FROM app_fixture.ensayos WHERE clave=%s",(clave,)).fetchone()[0]==1
+
+
+def test_expiracion_durante_espera_impide_provision(controles,postgres_aislado):
+    c=controles["a"]
+    identidad,credencial,_=c.registrar()
+    admin,_,_=postgres_aislado
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with admin.transaction():
+            admin.execute("SELECT id FROM app_fixture.ensayos WHERE id=%s FOR UPDATE",(identidad,))
+            pid=admin.execute("SELECT pg_backend_pid()").fetchone()[0]
+            trabajo=workers.submit(provisionar,c,identidad,credencial)
+            esperar_bloqueo(admin,pid)
+            expirar(admin,identidad)
+        with pytest.raises(psycopg.errors.ObjectNotInPrerequisiteState): trabajo.result(timeout=10)
+    estado=c.llamar("consultar",identidad,credencial)
+    assert estado["estado"]=="registrado" and estado["perfiles_restantes"]==0
+
+
+@pytest.mark.parametrize("operacion",["cerrar","limpiar"])
+def test_recuperacion_serializa_con_cierre_y_limpieza(controles,postgres_aislado,operacion):
+    c=controles["a"]
+    identidad,credencial,_=c.registrar()
+    provisionar(c,identidad,credencial)
+    if operacion=="limpiar": c.llamar("cerrar",identidad,credencial)
+    admin,_,_=postgres_aislado
+    expirar(admin,identidad)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        with psycopg.connect(c.dsn,autocommit=True) as conexion:
+            with conexion.transaction():
+                ejecutar(conexion,operacion,identidad,credencial)
+                pid=conexion.execute("SELECT pg_backend_pid()").fetchone()[0]
+                trabajo=workers.submit(controles["recuperador"].llamar,"recuperar_expirado",identidad)
+                esperar_bloqueo(admin,pid)
+        assert trabajo.result(timeout=10)["estado"]=="limpio"
+    assert c.llamar("consultar",identidad,credencial)["perfiles_restantes"]==0
+
+
+def test_agotamiento_conserva_reintentos_y_limpieza_sin_purgar(controles,postgres_aislado):
+    c=controles["a"]
+    identidad,credencial,clave=c.registrar()
+    admin,_,_=postgres_aislado
+
+    class RevertirRecibos(Exception): pass
+
+    with pytest.raises(RevertirRecibos):
+        with admin.transaction():
+            # Saturacion solo local y reversible: ninguna fila artificial se confirma.
+            admin.execute("""INSERT INTO app_fixture.ensayos
+                (id,operador_oid,operador_nombre,clave,token_hash,ttl,vence_en,estado,limpiado_en)
+                SELECT gen_random_uuid(),'fixture_control_a'::regrole::oid,'fixture_control_a',
+                    gen_random_uuid(),sha256(convert_to(%s,'UTF8')),60,clock_timestamp()+interval '1 minute',
+                    'limpio',clock_timestamp()
+                FROM generate_series(1,1000-(SELECT count(*)::integer FROM app_fixture.ensayos))""",(credencial,))
+            assert admin.execute("SELECT count(*) FROM app_fixture.ensayos").fetchone()[0]==1000
+            # Cambiar a una identidad MENOS privilegiada solo en esta transaccion local.
+            admin.execute("SET LOCAL SESSION AUTHORIZATION fixture_control_a")
+            assert UUID(ejecutar(admin,"registrar",clave,credencial,60)["id"])==identidad
+            with pytest.raises(psycopg.errors.ProgramLimitExceeded):
+                with admin.transaction(): ejecutar(admin,"registrar",uuid4(),secrets.token_hex(32),60)
+            ejecutar(admin,"provisionar",identidad,credencial,1,1,"0"*64)
+            ejecutar(admin,"cerrar",identidad,credencial)
+            assert ejecutar(admin,"limpiar",identidad,credencial)["estado"]=="limpio"
+            assert UUID(ejecutar(admin,"registrar",clave,credencial,60)["id"])==identidad
+            raise RevertirRecibos
+    assert c.llamar("consultar",identidad,credencial)["estado"]=="registrado"
 
 
 def test_rollback_de_provision_y_limpieza_completas(controles):
@@ -261,14 +421,7 @@ def test_espera_real_serializa_cierre_y_limpieza(controles,postgres_aislado,oper
         assert listo.wait(5)
         segundo=workers.submit(esperar)
         try:
-            limite=time.monotonic()+3
-            while True:
-                observado=admin.execute("""SELECT EXISTS(SELECT 1 FROM pg_stat_activity
-                    WHERE application_name='tinotify-fixture-test' AND wait_event_type='Lock'
-                    AND %s=ANY(pg_blocking_pids(pid)))""",(pids[0],)).fetchone()[0]
-                if observado: break
-                assert time.monotonic()<limite
-                time.sleep(.02)
+            esperar_bloqueo(admin,pids[0])
         finally:
             liberar.set()
         primero.result(); segundo.result()

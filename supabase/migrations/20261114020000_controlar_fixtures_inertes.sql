@@ -85,7 +85,8 @@ GRANT UPDATE(id) ON app.estudiantes TO tinotify_fixture_owner;
 CREATE POLICY fixture_lectura ON app.estudiantes FOR SELECT TO tinotify_fixture_owner
 USING(EXISTS(SELECT 1 FROM app_fixture.perfiles f WHERE f.estudiante_id=id));
 CREATE POLICY fixture_insercion ON app.estudiantes FOR INSERT TO tinotify_fixture_owner
-WITH CHECK(auth_subject IS NULL AND estado='pendiente');
+WITH CHECK(auth_subject IS NULL AND estado='pendiente'
+    AND EXISTS(SELECT 1 FROM app_fixture.perfiles f WHERE f.estudiante_id=app.estudiantes.id));
 CREATE POLICY fixture_bloqueo ON app.estudiantes FOR UPDATE TO tinotify_fixture_owner
 USING(EXISTS(SELECT 1 FROM app_fixture.perfiles f WHERE f.estudiante_id=id))
 WITH CHECK(auth_subject IS NULL AND estado='pendiente');
@@ -215,8 +216,10 @@ BEGIN
         estudiante:=gen_random_uuid(); cabecera:=gen_random_uuid();
         SELECT array_agg(gen_random_uuid()) INTO expedientes FROM generate_series(1,casos);
         -- Nunca ON CONFLICT: una colision revierte, no adopta un recurso previo.
-        INSERT INTO app.estudiantes(id,auth_subject,estado) VALUES(estudiante,NULL,'pendiente');
+        -- La pertenencia precede al perfil: RLS la exige. Ambas FK del registro
+        -- son INITIALLY DEFERRED y se satisfacen antes de confirmar la provision.
         INSERT INTO app_fixture.perfiles VALUES(e.id,estudiante,cabecera,expedientes);
+        INSERT INTO app.estudiantes(id,auth_subject,estado) VALUES(estudiante,NULL,'pendiente');
         INSERT INTO app.estados_reconciliacion
             (estudiante_id,id,instancia_utf8,epoca,situacion,schema_version,state_revision,fingerprint_version,trust_policy,migrated_from_v1)
         VALUES(estudiante,cabecera,convert_to('TINOTIFY_FIXTURE_'||e.id,'UTF8'),1,'activo',2,2,1,politica,false);

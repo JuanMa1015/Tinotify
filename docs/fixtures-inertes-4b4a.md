@@ -2,9 +2,16 @@
 
 ## Alcance real
 
-Base exacta: PR #7, `d6d6829`; rama `feature/4b4a-fixtures-inventario`.
+Base inicial: PR #7, `d6d6829`; rama `feature/4b4a-fixtures-inventario`.
+PR #7 ya se fusiono en main (`35627b7`); esta revision incorpora ese main mediante
+merge, sin reescribir historial. PR #8 permanece como borrador para revision manual.
+No se habilita automerge ni se modifican las protecciones de main. Un borrador
+impide su fusion ordinaria mientras conserve ese estado; no impide que otra
+persona con permisos lo marque listo. No debe marcarse listo hasta revisar la
+base actualizada, las nuevas comprobaciones y los limites de seguridad pendientes.
 La nueva migracion `20261114020000_controlar_fixtures_inertes.sql` esta preparada
-para revision y solo se ejecuto en PostgreSQL 17 local desechable. Las tres
+para revision. Su version anterior solo se ejecuto en PostgreSQL 17 desechable;
+la validacion de esta revision se distingue al final del documento. Las tres
 migraciones anteriores conservan sus SHA-256 LF, protegidos tambien por tests.
 No se consulto o modifico Supabase remoto, Supabase Auth, Render, FastAPI o SIGAC en esta fase.
 No se agregaron dependencias ni un harness remoto.
@@ -75,6 +82,34 @@ cuota falla, sin truncar ni eliminar filas. Revisar estos valores antes del desp
 No se introduce una purga automatica de recibos ni se permite reutilizar claves.
 Al llegar al limite de recibos se detiene el registro hasta una decision revisada.
 
+### Retencion indefinida y agotamiento
+
+Los 1000 recibos incluyen **todos** los estados, tambien limpio. No existe DELETE
+de ensayos para el propietario interno o los roles de control/recuperacion, ni un
+TTL de retencion: la expiracion del ensayo no expira su clave idempotente. Cerrar
+o limpiar libera cuota de ensayos no limpios, nunca cuota total de recibos.
+Al agotarse, registrar con una clave nueva falla con SQLSTATE 54000. Los replays
+autorizados con la misma clave/secreto/TTL se resuelven antes de comprobar cuotas;
+consultar, cerrar, limpiar y recuperar expirados siguen disponibles. Una provision
+pendiente sigue sometida a su vigencia y estado, no al total de recibos.
+
+Operativamente es un registro finito de ensayos Development. El controlador debe
+conservar su clave y secreto antes de enviar registrar; tras una respuesta incierta
+no debe generar otra clave. Reservar capacidad antes de una campana y detener los
+nuevos ensayos al agotarla. No rotar logins, recrear tablas ni borrar recibos para
+sortear el limite. La identidad de replay es el login SQL registrado (OID+nombre)
+y la clave; no equivale a una identidad global portable entre clusters. Renombrar,
+recrear o restaurar logins requiere revision y conservacion coherente del registro;
+una cuenta nueva no adquiere los recibos de otra. Usar claves CSPRNG nuevas por
+solicitud logica y no reciclar claves historicas al rotar identidades.
+
+No hay una purga segura aprobada. Una futura ampliacion de cuota o archivo exige
+otra migracion revisada: preservar de forma autoritativa la reserva de claves y
+los recibos necesarios para replay, incluido ante restauraciones, antes de admitir
+nuevos registros. Un archivo externo sin esa reserva no demuestra idempotencia.
+Respaldar recibos y registro juntos; sus hashes y nombres tecnicos siguen siendo
+metadata protegida. Esta entrega no automatiza archivo, borrado o recuperacion.
+
 ## Modelo de privilegios y amenazas
 
 | Rol | Permiso estable |
@@ -104,6 +139,22 @@ Las tres tablas nuevas tienen ENABLE/FORCE RLS y propietario postgres. Se agrega
 anteriores: no amplian las politicas de los servicios existentes. El trigger
 fixture_perfil_inerte solo restringe perfiles registrados; los demas no cambian.
 
+La insercion de estudiantes exige ahora auth_subject=NULL, estado=pendiente **y
+pertenencia previa** en app_fixture.perfiles para ese mismo id. Provisionar genera
+todos los IDs y registra primero la pertenencia, despues estudiante y cabecera.
+Las dos FK a estudiantes/cabeceras son DEFERRABLE INITIALLY DEFERRED: admiten ese
+orden dentro de una transaccion, pero rechazan un COMMIT con padres ausentes.
+No se deshabilitan constraints o triggers. La clave primaria impide adoptar un
+estudiante previo ante una colision; el error revierte toda la provision.
+
+Inmutabilidad significa que ningun llamador puede editar o registrar pertenencias
+arbitrarias y que el propietario interno carece de UPDATE en perfiles. Sus unicas
+rutas son INSERT de IDs nuevos en provisionar y DELETE al limpiar, con el ensayo
+bloqueado. No es inmutabilidad frente al administrador DDL ni frente a modificar
+el cuerpo de las funciones. Las politicas del registro no son por si solas prueba
+de aislamiento entre ensayos: tambien lo son las capacidades finitas, sus ACL,
+el control de login/secreto y la serializacion de estado. Se mantiene ese limite.
+
 SECURITY DEFINER tiene propietario interno, search_path=pg_catalog,pg_temp,
 nombres calificados, helpers sin EXECUTE publico y GRANT por firma. La migracion
 requiere postgres/PG17 y la base con RLS/propiedad esperados. El bootstrap temporal
@@ -130,6 +181,16 @@ Las operaciones de un ensayo bloquean su fila, y limpieza bloquea sus perfiles
 en orden UUID. No se agregan pertenencias tras provisionar. El estado cerrado
 impide una provision concurrente. Se prueban esperas reales mediante blocking_pids,
 no solo dos llamadas que podrian terminar ejecutandose secuencialmente.
+
+La nueva revision cubre registro de la misma clave desde dos conexiones, expiracion
+confirmada mientras provisionar espera y recuperacion expirada que espera a un
+cierre o limpieza aun sin confirmar. Se observa la cadena real de bloqueadores,
+incluidos los que esperan detras de otro waiter. Al obtener el bloqueo, READ
+COMMITTED permite evaluar el estado/expiracion ya confirmados. Un replay de una
+provision existente devuelve un recibo sin recrear recursos; cerrar o limpiar no
+renueva vigencia ni reabre ensayos. Deshabilitar entorno no cancela transacciones
+ya admitidas: para detenerlas hace falta coordinacion del operador, no asumir
+revocacion retroactiva del flag. No se introducen cancelaciones administrativas.
 
 Antes de borrar se exige la plantilla inerte exacta, sus IDs registrados y ausencia
 de actuaciones, eventos, sincronizaciones o importaciones. Si hay datos inesperados,
@@ -195,6 +256,39 @@ No ignorarlos silenciosamente. Supautils/event triggers del proveedor y su build
 no estan emulados; sus contadores se informan aparte. Tampoco se demuestra con
 el inventario la clasificacion de sujetos Auth ni la configuracion externa Data API.
 
+### Condiciones para comparar local y Supabase
+
+Antes de comparar, registrar SHA del commit, hashes LF de las cuatro migraciones
+y del extractor, digest de imagen local, version real remota y etapa aplicada.
+Generar la referencia desde ese commit en PostgreSQL 17 desechable, con el mismo
+perfil de deparser (encoding, search_path y quoting) y con un lector de catalogos
+sin DML. Usar una transaccion READ ONLY con snapshot consistente para la captura;
+no ejecutar funciones de negocio. Repetir la captura local para verificar orden
+determinista y conservar los artefactos fuera del repositorio hasta revisarlos.
+
+El inventario v1 espera las cuatro migraciones: antes de aplicar la cuarta, su
+ausencia es una diferencia de **etapa pendiente**, no evidencia de equivalencia
+final. El historial/preflight de la etapa anterior debe acreditar las tres ya
+aplicadas y la ausencia de colisiones; no comparar contra una referencia posterior
+y declarar que faltan objetos corruptos. Despues de una futura aplicacion autorizada,
+comparar el contrato completo y el historial esperado, sin repair automatico.
+
+| Diferencia | Tratamiento antes de cualquier escritura |
+| --- | --- |
+| Build o parche PG17, atributos de postgres administrado, bootstrap y logins ficticios locales | Diferencia esperable de contexto, nunca igualdad literal; justificar cada campo y producir referencia compatible cuando afecte al deparser o permisos |
+| Contadores supautils/event triggers, roles y otorgantes del proveedor | Revision explicita con evidencia del proveedor; los contadores no demuestran que sus efectos sean inocuos |
+| Propietarios, ENABLE/FORCE RLS, comandos/destinatarios/expresiones RLS, membresias ADMIN/SET/INHERIT | Bloquear hasta resolver; no tolerar por ser Supabase |
+| ACL de esquema/tabla/columna/funcion, derechos efectivos o default privileges inesperados | Bloquear; no ampliar ni ignorar permisos para aprobar la comparacion |
+| Columnas/orden/tipos/NOT NULL/defaults, constraints nominales/diferidas, indices, funciones/search_path/SECURITY DEFINER o triggers | Bloquear; los hashes distintos requieren analisis, sin borrar diferencias semanticas mediante normalizacion |
+| Historial incompatible, objetos extra, identidades desconocidas, servidor fuera de PG17 o contexto incompatible | Evidencia insuficiente/bloqueo; no generar una allowlist generica de excepciones |
+
+Toda excepcion revisada debe identificar ruta/campo exacto, valores o hashes
+esperados, razon, alcance y aprobacion; no excluir globalmente roles/ACL o secciones
+del JSON. El extractor no es un comparador autorizante ni una prueba de permisos
+de la conexion operativa concreta. La configuracion Data API, TLS/endpoint,
+identidad del proyecto Development y el bloqueo Auth necesitan evidencia separada.
+No hay snapshots nuevos de Supabase ni autorizacion de escritura en esta revision.
+
 ## Pruebas y aprobaciones pendientes
 
 Las pruebas nuevas son opt-in con el fixture Docker existente, que solo admite
@@ -203,7 +297,7 @@ ejecucion remota funcional en esta entrega. CI mantiene Linux/Windows sin secret
 Linux ejecuta integracion desechable. Las tres migraciones anteriores tienen
 guardas de SHA-256 normalizado a LF; no se cambian los algoritmos o JSON v2.2.
 
-Resultados locales ejecutados: **336 aprobadas y 59 omitidas** en la suite sin
+Resultados anteriores, correspondientes a `77f3034`: **336 aprobadas y 59 omitidas** en la suite sin
 PostgreSQL; **59 integraciones aprobadas en 17.11** y **59 en 17.12**, con TLS y
 las cuatro migraciones aplicadas NOSUPERUSER. `pip check` y `git diff --check`
 correctos. Se conserva el aviso previo HTTPX/Starlette TestClient. Se prueban
@@ -211,6 +305,21 @@ pertenencias ajenas, helpers/roles incorrectos, Auth/activacion bloqueados,
 cuotas concurrentes, cierre/provision y limpieza con bloqueo observado,
 rollback/respuesta descartada, recuperacion expirada y deteccion de drift.
 Estos resultados no acreditan ejecucion de DDL o limpieza en Supabase.
+
+Revision de endurecimiento posterior: suite local **336 aprobadas y 69 omitidas**,
+pip check y git diff --check correctos. Docker Desktop Linux Engine no esta
+disponible localmente; no se atribuyen a estas diez integraciones nuevas las 59
+aprobaciones historicas. Su ejecucion se delega al job Linux existente de CI,
+que aplica las cuatro migraciones NOSUPERUSER en PG17.12 desechable con TLS.
+Consultar en PR #8 los resultados asociados al nuevo SHA, no los de 77f3034.
+Las pruebas incluyen rechazo RLS sin pertenencia, FK incompletas que fallan al
+COMMIT y revierten, provision con comprobacion inmediata de las dos FK y commit
+valido, UPDATE de pertenencia rechazado y las carreras descritas. La saturacion
+a 1000 recibos usa solo filas ficticias dentro de una transaccion local que se
+revierte; prueba replays y limpieza en el limite sin purgar o confirmar esas filas.
+La sonda SET LOCAL ROLE del propietario y SET LOCAL SESSION AUTHORIZATION del
+controlador solo ocurre en ese contenedor para comprobar restricciones, sin GRANT
+temporal ni nuevos permisos. No es un procedimiento de suplantacion remoto.
 
 Antes de desplegar se necesita aprobacion humana independiente para:
 
