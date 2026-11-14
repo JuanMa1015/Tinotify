@@ -1,5 +1,9 @@
 # 4B.3: auditoria de compatibilidad y aplicacion controlada
 
+La [auditoria inicial 4B.4](validacion-remota-4b4.md) confirma que falta un ciclo
+de vida de fixtures remotos y documenta limites de este inventario para comparar
+esquemas completos. No se ha implementado ni ejecutado un harness remoto.
+
 ## Alcance y resultado observado
 
 Base: `origin/main`, `5fe6412` (PR #5 fusionado). Esta entrega no modifica las
