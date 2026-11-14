@@ -1,5 +1,9 @@
 # 4B.4: bloqueo previo al harness funcional remoto
 
+La propuesta posterior [4B.4-A](fixtures-inertes-4b4a.md) prepara un ciclo de vida
+solo para fixtures inertes e inventario ampliado. Mantiene bloqueado el vinculo
+Auth y no implementa el harness remoto; este documento conserva el diagnostico inicial.
+
 ## Estado de esta entrega
 
 Base auditada: `origin/main` en `f301aee1f3dbcd31fdb5fe3e6cae2ab27917c9a7`
