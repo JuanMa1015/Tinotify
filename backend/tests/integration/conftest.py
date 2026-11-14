@@ -33,7 +33,7 @@ class DsnFicticio(str):
 
 
 @pytest.fixture(scope="session")
-def postgres_aislado(tmp_path_factory):
+def postgres_aislado(tmp_path_factory, request):
     if os.environ.get("TINOTIFY_TEST_POSTGRES") != "1":
         pytest.skip("Integracion opt-in: PostgreSQL Docker aislado, sin servidor externo")
     version = os.environ.get("TINOTIFY_TEST_POSTGRES_VERSION", "17.12")
@@ -100,7 +100,11 @@ def postgres_aislado(tmp_path_factory):
                 harness.execute("ALTER ROLE postgres NOSUPERUSER")
                 try:
                     assert not admin.execute("SELECT rolsuper FROM pg_roles WHERE rolname=current_user").fetchone()[0]
-                    for migracion in sorted((root/"supabase/migrations").glob("*.sql")):
+                    migraciones=sorted((root/"supabase/migrations").glob("*.sql"))
+                    cantidad=getattr(request,"param",4)
+                    if cantidad not in (3,4) or len(migraciones)!=4:
+                        raise ValueError("La referencia solo admite la cadena revisada de tres o cuatro migraciones")
+                    for migracion in migraciones[:cantidad]:
                         admin.execute(migracion.read_text(encoding="utf-8"))
                     assert not admin.execute("""SELECT EXISTS (
                         SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid
@@ -108,13 +112,23 @@ def postgres_aislado(tmp_path_factory):
                         AND (m.inherit_option OR m.set_option))""").fetchone()[0]
                 finally:
                     admin.rollback()
-                    harness.execute("ALTER ROLE postgres SUPERUSER")
+                    if cantidad == 4:
+                        harness.execute("ALTER ROLE postgres SUPERUSER")
             roles = {}
-            for capacidad in ("api","sync","notifications"):
+            for capacidad in (("api","sync","notifications") if cantidad == 4 else ()):
                 rol = "fixture_"+capacidad
                 admin.execute(sql.SQL("CREATE ROLE {} LOGIN INHERIT PASSWORD {}").format(sql.Identifier(rol),sql.Literal(password)))
                 admin.execute(sql.SQL("GRANT {} TO {}").format(sql.Identifier("tinotify_"+capacidad),sql.Identifier(rol)))
                 roles[capacidad] = DsnFicticio(make_conninfo(**{**opciones,"user":rol}))
+            if cantidad == 3:
+                # Referencia PREVIA real, sin roles de fixtures ni cuarta migracion.
+                # postgres conserva NOSUPERUSER; bootstrap solo sirve a pruebas
+                # negativas dentro de este contenedor, nunca a la aplicacion.
+                roles["bootstrap_local"] = DsnFicticio(make_conninfo(**{**opciones,"user":"fixture_harness"}))
+                roles["imagen_digest"] = ejecutar("docker","image","inspect","--format","{{index .RepoDigests 0}}","postgres:"+version).split("@",1)[1]
+                admin.execute("CREATE SCHEMA supabase_migrations; CREATE TABLE supabase_migrations.schema_migrations(version text PRIMARY KEY)")
+                for migracion in migraciones[:3]:
+                    admin.execute("INSERT INTO supabase_migrations.schema_migrations VALUES(%s)",(migracion.name.split("_",1)[0],))
             yield admin,roles,tls/"server.crt"
     finally:
         try:
