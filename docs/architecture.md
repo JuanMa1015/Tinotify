@@ -41,6 +41,8 @@ móvil ni entrega push. La capa PostgreSQL de 4B.2-B es opt-in y no se conecta
 desde la API. Reutiliza las ocho tablas y el motor existente; véase
 [persistencia PostgreSQL](persistencia-postgresql.md) para permisos pendientes,
 identidad validada, límites y pruebas aisladas.
+La [auditoria 4B.3](preflight-supabase.md) verifica catalogos remotos sin aplicar
+migraciones y define criterios de parada y verificacion para su aplicacion futura.
 Los esquemas privados y roles mínimos de 4A sí existen en Supabase remoto;
 no contienen tablas de negocio.
 
