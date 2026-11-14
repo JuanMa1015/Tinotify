@@ -7,7 +7,7 @@ import pytest
 
 
 CHECKS = Path(__file__).resolve().parents[2]/"supabase/checks"
-CONSULTAS = ("4b3_preflight.sql", "4b3_historial.sql", "4b4a_inventario.sql")
+CONSULTAS = ("4b3_preflight.sql", "4b3_historial.sql", "4b4a_inventario.sql", "4b4b_preflight.sql")
 FUNCIONES = {
     "jsonb_build_object", "jsonb_agg", "to_jsonb", "to_regrole", "to_regclass",
     "to_regnamespace", "to_regprocedure", "replace", "oidvectortypes",
@@ -35,7 +35,7 @@ def comprobar_consulta(texto):
     # ejecutables resueltas por search_path. Esta guarda no sustituye la revision.
     sin_esquema={n.lower() for n in re.findall(r"(?<![\w.])([A-Za-z_]\w*)\s*\(",codigo)}
     assert sin_esquema <= {
-        "as","exists","values","coalesce","and","any","in","on","select","when","where",
+        "as","exists","values","coalesce","and","or","any","in","on","select","when","where",
         "previstas","funciones_esperadas","r","roles_esperados","tablas",
         "objetivos","firmas","nombres_roles","permisos","x",
     }
