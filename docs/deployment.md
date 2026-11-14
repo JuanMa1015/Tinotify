@@ -1,5 +1,10 @@
 # Despliegue de la API minima e historial de infraestructura
 
+La [auditoria 4B.3](preflight-supabase.md) documenta el estado remoto mas reciente,
+el preflight de solo lectura y el procedimiento futuro para las pendientes 4B.1
+y 4B.2-B. No se han aplicado en esa auditoria. El historial 4A de abajo conserva
+sus resultados originales; su dry-run sin pendientes no describe el checkout actual.
+
 ## 4B.2-A: API preparada para Render, sin desplegar
 
 La aplicación ASGI se importa como `tinotify.api:app` desde el paquete Python
@@ -84,7 +89,8 @@ y pytest desde la raíz en PR hacia `main` y push a `main`, con `python-version:
 en Linux y Windows: setup-python selecciona el parche compatible disponible en
 cada runner. Render mantiene el parche exacto 3.11.18; Windows no dispone de ese
 binario en setup-python. Sus permisos son solo de lectura y no recibe secretos ni ejecuta
-SQL, Supabase CLI o despliegues. SonarQube sigue siendo una comprobación separada;
+SQL remoto, Supabase CLI o despliegues. Linux ejecuta PostgreSQL desechable para
+las pruebas de integracion; no utiliza el proyecto Supabase. SonarQube sigue siendo una comprobación separada;
 la ejecución de pytest no importa automáticamente cobertura en SonarQube.
 CI usa el mismo instalador local no editable que Render y comprueba que Uvicorn
 carga `tinotify.api:app`, sin abrir un puerto en el runner. No se omiten ni rebajan

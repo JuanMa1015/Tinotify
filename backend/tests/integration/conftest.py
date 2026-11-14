@@ -36,6 +36,9 @@ class DsnFicticio(str):
 def postgres_aislado(tmp_path_factory):
     if os.environ.get("TINOTIFY_TEST_POSTGRES") != "1":
         pytest.skip("Integracion opt-in: PostgreSQL Docker aislado, sin servidor externo")
+    version = os.environ.get("TINOTIFY_TEST_POSTGRES_VERSION", "17.12")
+    if version not in ("17.11", "17.12"):
+        raise ValueError("Solo se admiten las versiones PostgreSQL 17 aisladas revisadas")
     endpoint = ejecutar("docker","context","inspect","--format","{{.Endpoints.docker.Host}}")
     if not endpoint.startswith(("unix://","npipe://")):
         raise RuntimeError("Las pruebas solo admiten Docker local")
@@ -58,7 +61,7 @@ def postgres_aislado(tmp_path_factory):
         ejecutar("docker","create","--name",nombre,"--network",red,
             "--publish","127.0.0.1::5432","--env-file",str(entorno),
             "--mount",f"type=bind,source={tls},target=/fixture,readonly",
-            "--entrypoint","sh","postgres:17.12","-c",
+            "--entrypoint","sh","postgres:"+version,"-c",
             "cp /fixture/server.crt /tmp/server.crt; cp /fixture/server.key /tmp/server.key; "
             "chown postgres:postgres /tmp/server.crt /tmp/server.key; chmod 600 /tmp/server.key; "
             "exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key")
