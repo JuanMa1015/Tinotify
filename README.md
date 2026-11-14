@@ -22,12 +22,14 @@ FastAPI importable como `tinotify.api:app`; la aplicación móvil sigue pendient
 | Seleccionar rol | POST implementado; no acredita autenticación ni autorización |
 | Reconocer página y menú | Comprobaciones preliminares; devuelven `autenticada=False` |
 | Autenticación real con SIGAC | No implementada ni validada |
-| PostgreSQL/Supabase | Infraestructura minima 4A aplicada y verificada; sin tablas de negocio ni adaptador Python |
+| PostgreSQL/Supabase | Adaptador opt-in y migración de permisos preparados; Supabase remoto sin cambios en esta fase |
 | API FastAPI | Solo `GET /health`; sin PostgreSQL, autenticación ni integración SIGAC |
 | App Expo | Prevista, no implementada |
 | Múltiples estudiantes | No soportados de forma segura actualmente |
 
-La suite contiene **303 pruebas: las 284 anteriores y 19 de API y dependencias**.
+La suite conserva las **303 pruebas anteriores**: **323 pruebas sin PostgreSQL**
+y **19 de integración opt-in**, con datos sintéticos y TLS. La suite ordinaria
+omite esas 19 pruebas cuando no se habilita explícitamente el entorno aislado.
 Incluye 43 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
 Una expectativa original cambió para exigir avisos sin datos del expediente.
 Su aprobación no demuestra preparación
@@ -38,7 +40,10 @@ concurrencia, identificación y persistencia siguen abiertos en
 La [preparación 4B.1](docs/etapa-4b-1.md) contiene una migración propuesta de ocho
 tablas con acceso cerrado y scripts de integridad/concurrencia para revisión.
 Se validó en PostgreSQL 17 aislado; no se ha aplicado a Supabase remoto.
-La API no utiliza estas tablas. El parser aprobado en
+La API no utiliza estas tablas. La [persistencia 4B.2-B](docs/persistencia-postgresql.md)
+reutiliza su modelo y el motor v2.2, con permisos de funciones preparados pero no
+aplicados al remoto. Solo admite comprobantes sintéticos; no autentica SIGAC.
+El parser aprobado en
 `526f01b` permanece en su rama independiente y no se fusiona en esta entrega.
 
 La [reconciliación de actuaciones](docs/reconciliacion.md) distingue primera
@@ -54,7 +59,7 @@ elevar IDs antiguos. Véase [contratos de identidad](docs/contratos-identidad.md
 ## Requisitos y dependencias
 
 - Python 3.11; entorno verificado con CPython 3.11.9 en Windows.
-- Ejecución: Beautiful Soup, HTTPX, FastAPI 0.162.7 y Uvicorn 0.54.0.
+- Ejecución: Beautiful Soup, HTTPX, FastAPI, Uvicorn y Psycopg 3 con su pool.
 - Desarrollo: pytest.
 - Para el comando de instalación por grupos: pip con soporte para `--group`
   (verificado localmente con pip 26.3).
