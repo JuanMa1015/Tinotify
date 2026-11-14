@@ -1,5 +1,9 @@
 # 4B.2-B: persistencia PostgreSQL, pendiente de revision y aplicacion remota
 
+La [revision 4B.4](validacion-remota-4b4.md) detiene el harness remoto: los permisos
+actuales no provisionan ni limpian fixtures por ejecucion. Propone un contrato
+separado para revision, sin ampliar las capacidades operativas de este adaptador.
+
 ## Alcance y compatibilidad
 
 Se reutilizan exactamente las ocho tablas de 4B.1 y el motor puro `reconciliar`.
