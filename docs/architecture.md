@@ -37,7 +37,10 @@ servicio y monitor JSON. Los resultados incluyen objetos de notificación.
 El cliente HTTP todavía no forma una integración autenticada validada de extremo
 a extremo. La API mínima de 4B.2-A responde únicamente disponibilidad del proceso;
 no invoca ese flujo, no carga `.env` ni inicia monitorización. No hay aplicación
-móvil, adaptador PostgreSQL ni entrega push.
+móvil ni entrega push. La capa PostgreSQL de 4B.2-B es opt-in y no se conecta
+desde la API. Reutiliza las ocho tablas y el motor existente; véase
+[persistencia PostgreSQL](persistencia-postgresql.md) para permisos pendientes,
+identidad validada, límites y pruebas aisladas.
 Los esquemas privados y roles mínimos de 4A sí existen en Supabase remoto;
 no contienen tablas de negocio.
 
@@ -80,8 +83,8 @@ Se ha elegido React Native con Expo y TypeScript para `mobile`, FastAPI en Rende
 para la API y PostgreSQL/Supabase Auth en el proyecto remoto existente. No se
 implementará SQLite ni se exige PostgreSQL local o Docker. EAS Build construirá
 la app nativa; Vercel solo se contempla para una versión web opcional. FastAPI y
-Uvicorn tienen versiones exactas; controladores PostgreSQL y SDK móviles siguen
-pendientes. `render.yaml` prepara el servicio mínimo sin desplegarlo y
+Uvicorn tienen versiones exactas. Psycopg 3 y su pool están fijados con hashes;
+los SDK móviles siguen pendientes. `render.yaml` conserva el servicio mínimo y
 `backend/requirements.txt` fija las dependencias de ejecución. El workflow de CI
 ejecuta pytest en Linux/Windows con Python 3.11; no administra infraestructura.
 
@@ -241,6 +244,7 @@ asíncrono con llamadas de red síncronas.
 | 4A, aplicada y verificada | CLI, esquemas privados y roles en Supabase remoto | Una entrada de historial, sin pendientes; propietarios y ACL comprobados; 241 pruebas sin red |
 | 4B.1, validada en aislamiento | Ocho tablas cerradas y pruebas de integridad/concurrencia | PostgreSQL 17 aislado; no aplicada a Supabase remoto |
 | 4B.2-A, implementada | API mínima FastAPI y preparación para Render Free | Contrato `/health`, inicio sin secretos y CI pytest; sin despliegue ni acceso a PostgreSQL |
+| 4B.2-B, implementada para revisión | Adaptador y funciones de persistencia sintética con las ocho tablas | Unidades sin DB e integración PostgreSQL TLS aislada; migración remota pendiente |
 | 4B y siguientes, pendientes | PostgreSQL transaccional, RLS, aislamiento y outbox | Reinicio, fallos, concurrencia e independencia de usuarios en entorno remoto dedicado |
 | 5, pendiente | FastAPI sobre datos sintéticos | Contratos y autorización comprobados sin acceder a SIGAC |
 | 6, pendiente | Diseño institucional de autenticación y sesiones | Revisión de permisos y aprobación previa a la integración real |

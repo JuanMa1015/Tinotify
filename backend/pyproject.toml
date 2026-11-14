@@ -12,6 +12,9 @@ dependencies = [
     "beautifulsoup4==4.15.0",
     "fastapi==0.162.7",
     "httpx==0.28.1",
+    "psycopg==3.3.9",
+    "psycopg-binary==3.3.9",
+    "psycopg-pool==3.3.3",
     "uvicorn==0.54.0",
 ]
 
@@ -46,11 +49,15 @@ local = [
     "pydantic==2.14.3",
     "pydantic-core==2.50.4",
     "Pygments==2.21.0",
+    "psycopg==3.3.9",
+    "psycopg-binary==3.3.9",
+    "psycopg-pool==3.3.3",
     "pytest==9.2.0",
     "soupsieve==4.1",
     "starlette==1.10.0",
     "typing-inspection==0.4.5",
     "typing_extensions==4.16.0",
+    "tzdata==2026.6; sys_platform == 'win32'",
     "uvicorn==0.54.0",
 ]
 
