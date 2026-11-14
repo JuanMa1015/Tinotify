@@ -52,7 +52,18 @@ def _sin_duplicados(pares):
     return datos
 
 
+def ruta_permitida(ruta, existe=True):
+    # Raiz fija: no usar resolve() en la raiz permitida, pues legitimaria una
+    # junction/symlink exportaciones que apuntase fuera del workspace.
+    base = RAIZ.resolve()/"exportaciones"
+    resuelta = ruta.resolve(strict=existe)
+    if not resuelta.is_relative_to(base) or resuelta.suffix != ".json":
+        raise ValueError("Solo se admiten JSON dentro de exportaciones del repositorio")
+    return resuelta
+
+
 def cargar(ruta):
+    ruta = ruta_permitida(ruta)
     exigir(ruta.stat().st_size <= 16*1024*1024)
     return json.loads(ruta.read_text(encoding="utf-8-sig"), object_pairs_hook=_sin_duplicados,
                       parse_constant=lambda _: exigir(False))
@@ -290,7 +301,7 @@ def main():
     try:
         if args.comando == "empaquetar":
             datos = empaquetar(cargar(args.preflight), cargar(args.catalogo), cargar(args.historial), args.origen, args.imagen_digest)
-            with args.salida.open("x", encoding="utf-8") as archivo:
+            with ruta_permitida(args.salida, existe=False).open("x", encoding="utf-8") as archivo:
                 archivo.write(canonico(datos)+"\n")
             return 0
         resultado = comparar(cargar(args.referencia), cargar(args.remoto), cargar(args.justificaciones) if args.justificaciones else ())

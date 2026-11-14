@@ -104,13 +104,40 @@ def test_snapshot_incompleto_o_corrupto_se_rechaza(modificar):
     with pytest.raises(ValueError): comp.validar_snapshot(comp.sellar(datos))
 
 
-def test_checksum_y_claves_json_duplicadas(tmp_path):
+def test_checksum_y_claves_json_duplicadas(tmp_path,monkeypatch):
     datos=snapshot()
     datos["commit"]="b"*40
     with pytest.raises(ValueError): comp.validar_snapshot(datos)
-    entrada=tmp_path/"duplicado.json"
+    monkeypatch.setitem(comp.cargar.__globals__,"RAIZ",tmp_path)
+    carpeta=tmp_path/"exportaciones"
+    carpeta.mkdir()
+    entrada=carpeta/"duplicado.json"
     entrada.write_text('{"x":1,"x":2}',encoding="utf-8")
     with pytest.raises(ValueError): comp.cargar(entrada)
+
+
+@pytest.mark.parametrize("nombre",["fuera.json","exportaciones/../fuera.json","exportaciones/entrada.txt"])
+def test_cli_rechaza_rutas_fuera_de_la_raiz_json(tmp_path,monkeypatch,nombre):
+    monkeypatch.setitem(comp.cargar.__globals__,"RAIZ",tmp_path)
+    (tmp_path/"exportaciones").mkdir()
+    destino=tmp_path/nombre
+    destino.write_text("{}",encoding="utf-8")
+    with pytest.raises(ValueError): comp.cargar(destino)
+    with pytest.raises(ValueError): comp.ruta_permitida(destino,existe=False)
+
+
+def test_cli_rechaza_enlace_que_escapa_de_exportaciones(tmp_path,monkeypatch):
+    monkeypatch.setitem(comp.cargar.__globals__,"RAIZ",tmp_path)
+    carpeta=tmp_path/"exportaciones"
+    carpeta.mkdir()
+    exterior=tmp_path/"fuera.json"
+    exterior.write_text("{}",encoding="utf-8")
+    enlace=carpeta/"enlace.json"
+    try:
+        enlace.symlink_to(exterior)
+    except OSError:
+        pytest.skip("Windows sin privilegio de crear enlaces; Linux CI cubre el escape")
+    with pytest.raises(ValueError): comp.cargar(enlace)
 
 
 def test_roles_rls_exactos_y_objetos_extra():

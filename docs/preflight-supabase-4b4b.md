@@ -75,6 +75,7 @@ Docker local disponible, ejecutar en PowerShell:
 ```powershell
 $env:TINOTIFY_TEST_POSTGRES='1'
 $env:TINOTIFY_TEST_POSTGRES_VERSION='17.12'
+New-Item -ItemType Directory -Force exportaciones | Out-Null
 backend/.venv/Scripts/python -B -m pytest backend/tests/integration/test_preflight_4b4b.py -v -p no:cacheprovider --basetemp exportaciones/referencia-4b4b
 Remove-Item Env:TINOTIFY_TEST_POSTGRES_VERSION
 Remove-Item Env:TINOTIFY_TEST_POSTGRES
@@ -130,7 +131,10 @@ backend/.venv/Scripts/python backend/scripts/comparar_catalogos.py comparar --re
 ```
 
 La herramienta no importa Psycopg, abre sockets, ejecuta SQL ni consulta remotos
-Git. Solo lee archivos y metadata Git local; empaquetar crea un archivo nuevo sin
+Git. Solo admite archivos .json dentro de exportaciones/ del repositorio; resuelve
+rutas y rechaza escapes por .., symlinks o junctions. Esa carpeta debe estar bajo
+control del operador local: no se afirma aislamiento frente a un atacante que
+cambie enlaces concurrentemente en su filesystem. Solo lee archivos y metadata Git local; empaquetar crea un archivo nuevo sin
 sobrescribir. Compara objetos completos y orden de arrays, sin normalizar SQL.
 Rechaza formato desconocido, campos ausentes/extra, tipos erroneos, claves JSON
 duplicadas, JSON no finito, checksum incorrecto, etapa/commit/hashes incompatibles

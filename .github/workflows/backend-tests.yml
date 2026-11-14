@@ -51,7 +51,9 @@ jobs:
         if: runner.os == 'Linux'
         env:
           TINOTIFY_TEST_POSTGRES: "1"
-        run: python -m pytest backend/tests/integration -v -p no:cacheprovider --basetemp .pytest_cache/postgresql
+        run: |
+          python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
+          python -m pytest backend/tests/integration -v -p no:cacheprovider --basetemp .pytest_cache/postgresql
       - name: Conservar referencia sintetica de tres migraciones
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
