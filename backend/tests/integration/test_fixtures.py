@@ -89,7 +89,9 @@ def test_ciclo_inerte_idempotencia_y_recibos(controles,postgres_aislado):
     c=controles["a"]
     identidad,credencial,clave=c.registrar()
     assert UUID(c.llamar("registrar",clave,credencial,60)["id"])==identidad
-    assert provisionar(c,identidad,credencial)==provisionar(c,identidad,credencial)
+    primera=provisionar(c,identidad,credencial)
+    repetida=provisionar(c,identidad,credencial)
+    assert primera==repetida
     admin,_,_=postgres_aislado
     perfiles=admin.execute("""SELECT e.auth_subject,e.estado FROM app.estudiantes e
         JOIN app_fixture.perfiles f ON f.estudiante_id=e.id WHERE f.ensayo_id=%s""",(identidad,)).fetchall()
