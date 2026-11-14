@@ -33,9 +33,10 @@ def snapshot(origen="local"):
         c["tablas"].append(dict(esquema="app_fixture",nombre=nombre,presente=False,owner="<rol_no_previsto>",tipo=None,rls=None,force_rls=None))
     for i in range(22):
         c["funciones"].append({**fila(comp.ESQUEMAS["funciones"]),"esquema":"app_private" if i<10 else "app_fixture","firma":f"sintetica_{i}()","presente":i<10})
-    for i in range(25):
-        c["politicas"].append({**fila(comp.ESQUEMAS["politicas"]),"nombre_sha256":f"{i:064x}",
-            "roles":[{"nombre":"tinotify_state_writer","identidad_sha256":"0"*64}]})
+    for esquema,tabla,nombre,comando,rol in comp.POLITICAS_TRES:
+        c["politicas"].append({**fila(comp.ESQUEMAS["politicas"]),"esquema":esquema,"tabla":tabla,
+            "nombre_sha256":comp.hash_identificador(nombre),"comando":comando,
+            "roles":[{"nombre":rol,"identidad_sha256":comp.hash_identificador(rol)}]})
     p = dict(formato="tinotify_precondiciones_4b4b_v1",pg17=True,
              lectura=dict(read_only=True,row_security=True,sin_cambio_identidad=True),
              colisiones=dict.fromkeys("esquema_fixture roles_fixture roles_tinotify_extra politicas_reservadas trigger_reservado rutinas_fixture".split(),0),
@@ -141,11 +142,12 @@ def test_cli_rechaza_enlace_que_escapa_de_exportaciones(tmp_path,monkeypatch):
 
 
 def test_roles_rls_exactos_y_objetos_extra():
-    for seccion in ("politicas","extras"):
-        datos=snapshot("remoto")
-        if seccion=="politicas": datos["catalogo"][seccion][0]["roles"][0]["nombre"]="PUBLIC"
-        else: datos["catalogo"][seccion]["relaciones"]=1
-        assert comp.comparar(snapshot(),comp.sellar(datos))["veredicto"]=="bloqueado"
+    datos=snapshot("remoto")
+    datos["catalogo"]["politicas"][0]["roles"][0]["nombre"]="PUBLIC"
+    with pytest.raises(ValueError): comp.comparar(snapshot(),comp.sellar(datos))
+    datos=snapshot("remoto")
+    datos["catalogo"]["extras"]["relaciones"]=1
+    assert comp.comparar(snapshot(),comp.sellar(datos))["veredicto"]=="bloqueado"
 
 
 def test_justificacion_exacta_no_excluye_seguridad():
@@ -182,3 +184,82 @@ def test_ambos_snapshots_inseguros_no_se_validan_por_igualdad():
     local,remoto=snapshot(),snapshot("remoto")
     for d in (local,remoto): d["catalogo"]["tablas"][0]["force_rls"]=False
     assert comp.comparar(comp.sellar(local),comp.sellar(remoto))["veredicto"]=="bloqueado"
+
+
+def test_contrato_nominal_independiente_de_los_snapshots():
+    # Lista revisada contra el DDL, independiente de la fabrica snapshot().
+    escritura={"writer_lectura","writer_insert","writer_update"}
+    esperadas={
+        ("app","estudiantes"):{"perfil_reader","perfil_writer_lectura","perfil_writer_bloqueo"},
+        ("app_private","accesos_sigac"):{"lectura_contexto","acceso_writer_lectura","acceso_writer_bloqueo"},
+        ("app_private","sincronizaciones"):escritura,
+        **{("app",t):escritura|{"lectura_contexto"} for t in
+           ("estados_reconciliacion","expedientes","actuaciones","eventos")},
+    }
+    nominales={(e,t,n) for e,t,n,_,_ in comp.POLITICAS_TRES}
+    assert nominales=={(e,t,n) for (e,t),nombres in esperadas.items() for n in nombres}
+    assert len(comp.POLITICAS_TRES)==len(nominales)==25
+
+
+def alterar_politicas(politicas,tipo):
+    if tipo=="ausente":
+        politicas.pop()
+    elif tipo=="extra":
+        politicas.append({**politicas[0],"nombre_sha256":"f"*64})
+    elif tipo=="duplicada":
+        politicas[1]=dict(politicas[0])
+    elif tipo=="duplicada_otro_cuerpo":
+        politicas[1]={**politicas[0],"check_sha256":"f"*64}
+    elif tipo=="sustituida":
+        politicas[0]["nombre_sha256"]="f"*64
+    elif tipo=="otra_tabla":
+        politicas[0]["tabla"]="expedientes"
+    elif tipo=="otro_esquema":
+        politicas[0]["esquema"]="app_private"
+    elif tipo=="otro_comando":
+        politicas[0]["comando"]="*"
+    elif tipo=="restrictiva":
+        politicas[0]["permisiva"]=False
+    elif tipo=="otro_destinatario":
+        politicas[0]["roles"]=[{"nombre":"PUBLIC","identidad_sha256":comp.hash_identificador("PUBLIC")}]
+    else:
+        raise AssertionError("Alteracion de prueba no prevista")
+
+
+@pytest.mark.parametrize("tipo",["ausente","extra","duplicada","duplicada_otro_cuerpo","sustituida",
+                                 "otra_tabla","otro_esquema","otro_comando","restrictiva","otro_destinatario"])
+@pytest.mark.parametrize("destino",["referencia","remoto","ambos"])
+def test_politicas_invalidas_se_rechazan_sin_confiar_en_igualdad(tipo,destino):
+    referencia,remoto=snapshot(),snapshot("remoto")
+    if destino in ("referencia","ambos"):
+        alterar_politicas(referencia["catalogo"]["politicas"],tipo)
+    if destino in ("remoto","ambos"):
+        alterar_politicas(remoto["catalogo"]["politicas"],tipo)
+    if destino=="ambos":
+        assert referencia["catalogo"]["politicas"]==remoto["catalogo"]["politicas"]
+    # Recalcular integridad evita que la prueba pase solo por un checksum viejo.
+    with pytest.raises(ValueError): comp.comparar(comp.sellar(referencia),comp.sellar(remoto))
+
+
+def test_empaquetado_registra_head_real_sin_sustituir_sha_del_artefacto(monkeypatch):
+    checkout={"head":"a"*40}
+    comandos=[]
+
+    def git_ficticio(comando,**_):
+        comandos.append(comando)
+        return SimpleNamespace(stdout=checkout["head"]+"\n" if comando==["git","rev-parse","HEAD"] else "")
+
+    monkeypatch.setattr(comp.subprocess,"run",git_ficticio)
+    datos=snapshot()
+    args=(datos["preflight"],datos["catalogo"],datos["historial"])
+    artefacto=comp.empaquetar(*args,"local",datos["imagen_digest"])
+    remoto=comp.empaquetar(*args,"remoto",None)
+    assert artefacto["commit"]==remoto["commit"]==checkout["head"]
+    assert comp.comparar(artefacto,remoto)["veredicto"]=="evidencia_insuficiente"
+    # H (head de rama) y M (merge de prueba) pueden tener identico manifiesto.
+    checkout["head"]="b"*40
+    otro_checkout=comp.empaquetar(*args,"remoto",None)
+    assert otro_checkout["archivos_sha256"]==artefacto["archivos_sha256"]
+    assert otro_checkout["commit"]!=artefacto["commit"]
+    with pytest.raises(ValueError): comp.comparar(artefacto,otro_checkout)
+    assert all(c[0]=="git" and c[1] in ("ls-files","diff","rev-parse") for c in comandos)

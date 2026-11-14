@@ -32,6 +32,18 @@ controlados. Los nombres no previstos se representan con hashes; no son anonimos
 No se inventarian todos los objetos ajenos de todo el cluster ni se demuestra
 que un hook administrado futuro sea inocuo por observar un contador.
 
+Cada snapshot debe contener exactamente las **25 identidades de politica** de
+20261114010000, verificadas por (esquema, tabla, SHA-256 UTF8 del nombre). El
+comparador mantiene un contrato nominal revisado contra ese DDL, independiente
+del contenido de cualquiera de los dos snapshots. Exige ademas comando,
+caracter permisivo y destinatario unico con su nombre/hash esperados. Se rechazan
+ausencias, extras, sustituciones y dos filas con la misma identidad aunque sus
+cuerpos sean diferentes, tambien si ambos snapshots contienen la misma alteracion.
+No se reconstruyen politicas ausentes ni se deducen identidades de su posicion.
+Los hashes de USING/WITH CHECK siguen comparandose con la referencia de procedencia
+revisada: el contrato nominal no es una validacion independiente de sus expresiones.
+Los campos existentes bastan; no cambia el formato del catalogo o snapshot.
+
 ## Lo observable no demuestra ejecucion DDL
 
 La cuarta migracion crea roles NOLOGIN sin atributos administrativos, esquema,
@@ -98,6 +110,71 @@ GitHub. Para comparar, usar exactamente ese checkout o regenerar referencia en
 un commit comun. No atribuirle el SHA de otro commit ni editar el manifiesto.
 Para PG17.11, repetir con esa version en otro directorio; no intercambiar
 referencias entre parches sin revisar efectos del deparser.
+
+### Commit del artefacto, de referencia y de empaquetado remoto
+
+En un run pull_request hay tres commits distintos que no deben confundirse:
+B es la base main, H el head de la rama del PR y M el merge de prueba que GitHub
+construye. El workflow actual usa actions/checkout sin ref alternativo, por lo
+que el checkout y github.sha son M. El nombre del artefacto usa github.sha;
+empaquetar obtiene snapshot.commit de git rev-parse HEAD, tambien M. En cambio,
+workflow_run.head_sha identifica H. Ese campo de metadata del run no sustituye M.
+
+Comprobacion real del artefacto del run 43621790825, correspondiente a 240c733:
+
+| Evidencia | SHA observado |
+| --- | --- |
+| Head de rama H / workflow_run.head_sha | 240c733dd91054f2c23a80f6de66f4d7b8f5a154 |
+| Sufijo del artefacto / checkout CI M / snapshot.commit | 413f236054e0263f5a38ea291e4b438c13fed864 |
+| SHA-256 del archivo referencia-tres.json descargado | 908e80d3fc2af4aa2ddd09b878d6991a9d45aa17591e0012627951044a8cac86 |
+
+Se leyo el JSON sintetico descargado, no solo su nombre: etapa=3 y 25 politicas.
+El ZIP contiene dos copias iguales por el alias current de tmp_path de pytest;
+ambas tienen ese mismo hash y commit. Esto no aporta dos referencias independientes.
+Es un ejemplo HISTORICO: esta correccion cambia el comparador y requiere artefacto
+nuevo. No reutilizar su manifiesto con el checkout posterior ni editar su SHA.
+
+La igualdad exigida es:
+
+```text
+C_referencia = artefacto.snapshot.commit = checkout que genero la referencia
+C_remoto     = git HEAD del checkout limpio que ejecuta empaquetar --origen remoto
+C_referencia = C_remoto, y ambos manifiestos de archivos deben ser iguales
+```
+
+No basta que dos trees o los archivos relevantes sean identicos si sus commits
+son diferentes. El comparador rechaza esa pareja. Empaquetar no acepta un parametro
+para elegir el SHA: lee HEAD y verifica archivos relevantes limpios/versionados.
+Las pruebas usan un Git ficticio para demostrar mismo HEAD aceptado y otro HEAD
+rechazado aun con el mismo manifiesto; no escriben commits ni cambian la evidencia.
+
+Para usar un artefacto CI, verificar primero procedencia/digest y leer su commit.
+El siguiente procedimiento Git es solo una preparacion manual, no una consulta
+a Supabase. Ejecutarlo desde el repositorio y con una referencia ya descargada
+en exportaciones/referencia-tres.json:
+
+```powershell
+$shaReferencia = (Get-Content -LiteralPath exportaciones/referencia-tres.json -Raw | ConvertFrom-Json).commit
+if ($shaReferencia -notmatch '^[0-9a-f]{40}$') { throw 'SHA de referencia invalido' }
+git fetch origin refs/pull/9/merge
+if ($LASTEXITCODE -ne 0) { throw 'No se pudo obtener el merge de prueba' }
+$shaDisponible = git rev-parse FETCH_HEAD
+if ($shaDisponible -ne $shaReferencia) { throw 'Cambio el merge de prueba: regenerar referencia, sin editar el SHA' }
+git worktree add --detach exportaciones/checkout-evidencia $shaReferencia
+```
+
+En ese worktree, comprobar HEAD y copiar alli a exportaciones/ la referencia y
+las capturas previamente autorizadas. Ejecutar su comparador/empaquetador con
+Python 3.11; no hace falta instalar dependencias externas para esa herramienta.
+No reutilizar rutas relativas que apunten a otro checkout. Si M ya no se puede
+obtener o cambio main, regenerar una referencia desde un commit accesible comun.
+Tras fusionar el PR, el nuevo commit de main tambien exige referencia nueva.
+No renombrar H como M ni reemplazar snapshot.commit a mano en ninguna alternativa.
+
+La captura SQL remota debe usar los archivos exactos de ese mismo checkout; el
+empaquetador no puede probar retroactivamente que se ejecutaron esos archivos.
+Registrar esa procedencia durante la captura humana. El checksum detecta cambios
+accidentales, no una declaracion falsa de procedencia por quien controle el JSON.
 
 ## Captura remota: comandos preparados, NO autorizados ni ejecutados
 

@@ -27,6 +27,42 @@ ROLES = ("anon", "authenticated", "postgres", "service_role", "tinotify_api",
 HASH = re.compile(r"[0-9a-f]{64}")
 
 
+def politicas_tres_migraciones():
+    """Contrato nominal revisado contra 20261114010000, no contra un snapshot."""
+    perfiles = [("app", "estudiantes", "perfil_reader", "r", "tinotify_guard_reader"),
+                ("app", "estudiantes", "perfil_writer_lectura", "r", "tinotify_state_writer"),
+                ("app", "estudiantes", "perfil_writer_bloqueo", "w", "tinotify_state_writer")]
+    lectura = [(esquema, tabla, "lectura_contexto", "r", "tinotify_guard_reader")
+               for esquema, tabla in (("app", "estados_reconciliacion"), ("app", "expedientes"),
+                   ("app", "actuaciones"), ("app", "eventos"), ("app_private", "accesos_sigac"))]
+    escritura = [(esquema, tabla, nombre, comando, "tinotify_state_writer")
+                 for esquema, tabla in (("app", "estados_reconciliacion"), ("app", "expedientes"),
+                     ("app", "actuaciones"), ("app", "eventos"), ("app_private", "sincronizaciones"))
+                 for nombre, comando in (("writer_lectura", "r"), ("writer_insert", "a"), ("writer_update", "w"))]
+    accesos = [("app_private", "accesos_sigac", "acceso_writer_lectura", "r", "tinotify_state_writer"),
+               ("app_private", "accesos_sigac", "acceso_writer_bloqueo", "w", "tinotify_state_writer")]
+    return tuple(perfiles + lectura + escritura + accesos)
+
+
+POLITICAS_TRES = politicas_tres_migraciones()
+
+
+def hash_identificador(nombre):
+    # pg_catalog.convert_to(...,'UTF8') + sha256; no JSON ni normalizacion.
+    return hashlib.sha256(nombre.encode("utf-8")).hexdigest()
+
+
+def validar_politicas(politicas):
+    esperadas = {(e, t, hash_identificador(n)): (comando, rol)
+                 for e, t, n, comando, rol in POLITICAS_TRES}
+    identidades = [(p["esquema"], p["tabla"], p["nombre_sha256"]) for p in politicas]
+    exigir(len(politicas) == 25 and len(set(identidades)) == 25 and set(identidades) == set(esperadas))
+    for politica, identidad in zip(politicas, identidades):
+        comando, rol = esperadas[identidad]
+        exigir(politica["comando"] == comando and politica["permisiva"] is True)
+        exigir(politica["roles"] == [{"nombre": rol, "identidad_sha256": hash_identificador(rol)}])
+
+
 def canonico(valor):
     return json.dumps(valor, sort_keys=True, ensure_ascii=True, separators=(",", ":"), allow_nan=False)
 
@@ -148,7 +184,7 @@ def validar_catalogo(datos):
         exigir([c["orden"] for c in columnas] == list(range(1, cantidad+1)))
         exigir(all(any((r["esquema"], r["tabla"]) == tabla for r in datos[s]) for s in ("constraints", "indices", "acl_tablas")))
     exigir(len(datos["columnas"]) == sum(TABLAS.values()))
-    exigir(len(datos["politicas"]) >= 25)
+    validar_politicas(datos["politicas"])
 
 
 def validar_preflight(p):

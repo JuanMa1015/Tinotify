@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from ..test_comparador_catalogos import comp
+from ..test_comparador_catalogos import alterar_politicas, comp
 
 
 pytestmark = pytest.mark.parametrize("postgres_aislado", [3], indirect=True)
@@ -41,6 +41,19 @@ def test_referencia_real_tres_migraciones_reproducible(postgres_aislado,tmp_path
     (tmp_path/"referencia-tres.json").write_text(comp.canonico(primera)+"\n",encoding="utf-8")
     espejo=comp.sellar({**primera,"origen":"remoto","imagen_digest":None})
     assert comp.comparar(primera,espejo)["veredicto"]=="evidencia_insuficiente"
+
+
+@pytest.mark.parametrize("tipo",["ausente","duplicada_otro_cuerpo","sustituida"])
+def test_ambas_evidencias_alteradas_desde_captura_real_se_rechazan(postgres_aislado,tipo):
+    admin,roles,_=postgres_aislado
+    referencia=captura(admin,roles)
+    remoto=deepcopy(referencia)
+    remoto.update(origen="remoto",imagen_digest=None)
+    for datos in (referencia,remoto):
+        alterar_politicas(datos["catalogo"]["politicas"],tipo)
+    assert referencia["catalogo"]==remoto["catalogo"]
+    # Solo se alteran copias Python; ningun DDL o permiso se cambia para este test.
+    with pytest.raises(ValueError): comp.comparar(comp.sellar(referencia),comp.sellar(remoto))
 
 
 @pytest.mark.parametrize("cambio,categoria",[
