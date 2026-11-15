@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import math
 
 MODO_LOCAL = "pruebas-locales"
 MODO_REMOTO = "remoto"
@@ -113,7 +114,7 @@ def _numero(texto, minimo, maximo, codigo, *, tipo=float):
         valor = tipo(texto)
     except (TypeError, ValueError):
         _rechazar(codigo)
-    if not minimo <= valor <= maximo or valor != valor:
+    if not minimo <= valor <= maximo or not math.isfinite(valor):
         _rechazar(codigo)
     return valor
 
