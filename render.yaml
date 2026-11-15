@@ -8,7 +8,7 @@ services:
     rootDir: backend
     autoDeployTrigger: "off"
     buildCommand: python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check
-    startCommand: python -m uvicorn tinotify.api:app --host 0.0.0.0 --port "$PORT" --workers 1
+    startCommand: python -m uvicorn tinotify.sintetico_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

@@ -31,12 +31,35 @@ def resumir(valor: object) -> str:
 
 @dataclass(frozen=True)
 class Anexo:
+    """Anexo registrado con su descripción.
+
+    `sin_enlace` significa solo que la respuesta no trajo una referencia de descarga;
+    no afirma que el archivo no exista (podría deberse a permisos o a un error).
+    """
+
     descripcion: str
     archivo: str
     referencia: str
+    sin_enlace: bool = False
 
-    def contenido(self) -> dict[str, str]:
-        return {campo: texto_canonico(getattr(self, campo)) for campo in ("descripcion", "archivo", "referencia")}
+    def __post_init__(self):
+        for campo in ("descripcion", "archivo", "referencia"):
+            texto_canonico(getattr(self, campo))
+        if type(self.sin_enlace) is not bool:
+            raise ValueError("Marca de anexo sin enlace no válida.")
+        if self.sin_enlace:
+            if self.archivo != "" or self.referencia != "" or not self.descripcion.strip():
+                raise ValueError("Un anexo sin enlace exige descripción y no admite archivo ni referencia.")
+        elif not self.referencia.strip():
+            raise ValueError("Un anexo con enlace exige una referencia.")
+
+    def contenido(self) -> dict:
+        contenido = {campo: texto_canonico(getattr(self, campo)) for campo in ("descripcion", "archivo", "referencia")}
+        if self.sin_enlace:
+            # La clave solo existe cuando es verdadera: los anexos con enlace conservan
+            # exactamente su representación (y huella) anterior.
+            contenido["sin_enlace"] = True
+        return contenido
 
 
 @dataclass(frozen=True)
