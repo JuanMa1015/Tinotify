@@ -111,6 +111,92 @@ un commit comun. No atribuirle el SHA de otro commit ni editar el manifiesto.
 Para PG17.11, repetir con esa version en otro directorio; no intercambiar
 referencias entre parches sin revisar efectos del deparser.
 
+### 4B.4-C: referencia PG17.11 del checkout fijo 838067ae
+
+La primera lectura comunicada por el usuario en Development declara PG17.11,
+postgres como current_user/session_user, READ ONLY, REPEATABLE READ y row_security
+on. No se realizaron lecturas adicionales desde el agente. La referencia 17.12
+de main no se convierte en 17.11 editando metadata: se requiere PostgreSQL real.
+
+`.github/workflows/referencia-pg1711.yml` prepara esa referencia en un runner Linux
+desechable. Se activa mediante un PR hacia main que cambie ese archivo, desde
+`codex/referencia-pg1711-838067ae` del mismo repositorio. No usa workflow_dispatch,
+por lo que no requiere fusionar un workflow manual en main antes de ejecutarlo.
+Debe comprobarse el run real del PR borrador: si GitHub no ejecuta el job,
+detenerse y proponer otra via, sin fusionarlo o cambiar permisos para eludirlo.
+
+El workflow tiene contents: read, acciones fijadas por SHA, sin secrets de proyecto
+ni environment remoto. Hace checkout explicito e inmutable de
+`838067ae69f88ad132a4bafb351306f5c2eb8f21`, verifica HEAD/arbol limpio e instala
+las dependencias existentes con hashes/solo wheels y el paquete local sin red.
+Ejecuta UNICAMENTE este nodo con TINOTIFY_TEST_POSTGRES_VERSION=17.11:
+
+```text
+backend/tests/integration/test_preflight_4b4b.py::test_referencia_real_tres_migraciones_reproducible
+```
+
+Ese test parametriza el fixture con tres migraciones, crea un contenedor nuevo,
+mantiene NOSUPERUSER y genera historial sintetico [1,1,1,0]. No aplica ni revierte
+la cuarta migracion, no provisiona sujetos Auth y no necesita credenciales del
+desarrollador. El CI habitual del PR tambien se ejecuta sin cambios; sus pruebas
+y artefacto 17.12 son independientes de esta referencia fija 17.11.
+
+Antes de publicar se exige server_version_num=170011, las 25 identidades nominales
+con comandos/roles exactos mediante validar_snapshot del checkout fijo, checksum
+interno, historial sin versiones ajenas, ausencia de colisiones/app_fixture,
+ocho tablas con RLS/FORCE y propietario esperado, y hashes LF de los once archivos
+del manifiesto contra los bytes del checkout. El digest de imagen del snapshot
+debe coincidir con RepoDigests de `docker image inspect postgres:17.11` en ese
+mismo runner. La version/build exacta y el digest quedan en el JSON original.
+
+Se publican solo dos archivos durante tres dias:
+
+| Archivo | Contenido |
+| --- | --- |
+| referencia-tres.json | Bytes originales generados por el test, sin sustituir SHA, version o hashes |
+| procedencia.json | Commit fuente, commit/ref del workflow, commit del evento, repo/run/intento, version PG, digest imagen y hashes de referencia/manifiesto/checksum |
+
+El nombre del artefacto usa el HEAD fuente VERIFICADO y el run/intento:
+`referencia-pg1711-838067ae69f88ad132a4bafb351306f5c2eb8f21-<run>-<intento>`.
+Se copian solo los archivos finales a un directorio dedicado de RUNNER_TEMP;
+no se suben credenciales, env, TLS, logs ni aliases current duplicados de pytest.
+La estructura del snapshot y el comparador no cambian.
+
+Hay dos procedencias legitimas: W es el commit del workflow conductor aprobado,
+y S=838067ae es el checkout del codigo/datos de referencia. GitHub puede identificar
+el run con W u otro commit del evento; no debe presentarse ese valor como S.
+El checkout contiene la version original de backend-tests.yml en S, incluida en
+su manifiesto; el workflow conductor nuevo se acredita por workflow_commit/ref
+y el run GitHub, no fingiendo que formaba parte de S. Conservar ambas evidencias.
+
+Procedimiento de obtencion, sin autorizar consultas remotas:
+
+1. Abrir y mantener el PR en borrador. Confirmar que el workflow de referencia
+   realmente arranca sin fusionarlo y que todos sus pasos terminan correctamente.
+2. Descargar el artefacto del run correcto. Comparar SHA-256 del ZIP descargado
+   con el digest publicado por Actions, y el JSON con referencia_sha256 de la
+   procedencia. No confundir checksum de ZIP, JSON y checksum interno del snapshot.
+3. Verificar source_commit y snapshot.commit contra 838067ae; contrastar W/ref y
+   run/intento con GitHub. Ejecutar validar_snapshot y comparar los once hashes
+   de archivos con un checkout limpio de S. Confirmar PG170011, etapa e historial.
+4. Guardar los JSON en exportaciones/ fuera de Git. No reutilizar la referencia
+   PG17.12, sobrescribir artefactos anteriores ni editar campos para aprobar.
+5. Solo tras otra autorizacion, capturar Supabase con los scripts exactos de S y
+   empaquetar desde el mismo checkout S. Comparar con esta referencia 17.11.
+
+Ejemplo posterior OFFLINE, desde S y con archivos completos ya autorizados:
+
+```powershell
+backend/.venv/Scripts/python backend/scripts/comparar_catalogos.py empaquetar --origen remoto --preflight exportaciones/preflight.json --catalogo exportaciones/catalogo.json --historial exportaciones/historial.json --salida exportaciones/remoto-tres.json
+backend/.venv/Scripts/python backend/scripts/comparar_catalogos.py comparar --referencia exportaciones/pg1711/referencia-tres.json --remoto exportaciones/remoto-tres.json
+```
+
+No basta coincidir en 17.11: builds, roles, ACL y efectos del proveedor siguen
+sujetos a comparacion/revision exactas. Igualdad conserva evidencia_insuficiente.
+No se habilita app_fixture, modifica Supabase/Auth/permisos, conecta Render o SIGAC
+ni se aplica DDL remoto. El resultado real del workflow y su artefacto se registran
+en el PR: preparar este archivo no acredita una ejecucion todavia no observada.
+
 ### Commit del artefacto, de referencia y de empaquetado remoto
 
 En un run pull_request hay tres commits distintos que no deben confundirse:

@@ -1,0 +1,140 @@
+name: Referencia sintetica PostgreSQL 17.11
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/referencia-pg1711.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: referencia-pg1711-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  referencia:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'codex/referencia-pg1711-838067ae'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      SOURCE_COMMIT: 838067ae69f88ad132a4bafb351306f5c2eb8f21
+    steps:
+      - name: Obtener exclusivamente el checkout de referencia
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: 838067ae69f88ad132a4bafb351306f5c2eb8f21
+          persist-credentials: false
+      - name: Preparar Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Verificar procedencia del checkout
+        id: fuente
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          fuente = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if fuente != os.environ["SOURCE_COMMIT"]:
+              raise RuntimeError("Checkout distinto del commit aprobado")
+          if subprocess.check_output(["git", "status", "--porcelain"], text=True).strip():
+              raise RuntimeError("Checkout con cambios locales")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as salida:
+              salida.write("sha=" + fuente + "\n")
+          print("Checkout verificado: " + fuente)
+          PY
+      - name: Instalar dependencias externas verificadas
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
+      - name: Instalar exclusivamente el paquete local
+        run: |
+          python backend/scripts/install_local.py
+          python -m pip check
+      - name: Generar solo la referencia de tres migraciones en PG17.11
+        env:
+          TINOTIFY_TEST_POSTGRES: "1"
+          TINOTIFY_TEST_POSTGRES_VERSION: "17.11"
+        run: |
+          python -c "from pathlib import Path; Path('.pytest_cache').mkdir(exist_ok=True)"
+          python -m pytest backend/tests/integration/test_preflight_4b4b.py::test_referencia_real_tres_migraciones_reproducible -v -p no:cacheprovider --basetemp .pytest_cache/pg1711
+      - name: Validar referencia y preparar evidencia minima
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import runpy
+          import subprocess
+
+          def exigir(condicion, mensaje):
+              if not condicion:
+                  raise RuntimeError(mensaje)
+
+          fuente = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          exigir(fuente == os.environ["SOURCE_COMMIT"], "Cambio el checkout")
+          exigir(not subprocess.check_output(["git", "status", "--porcelain"], text=True).strip(), "Checkout alterado")
+          rutas = {p.resolve() for p in Path(".pytest_cache/pg1711").rglob("referencia-tres.json")}
+          exigir(len(rutas) == 1, "Se requiere una sola referencia real")
+          ruta = rutas.pop()
+          contenido = ruta.read_bytes()
+          snapshot = json.loads(contenido)
+          comparador = runpy.run_path("backend/scripts/comparar_catalogos.py")
+          comparador["validar_snapshot"](snapshot)
+          exigir(snapshot["commit"] == fuente and snapshot["etapa"] == 3 and snapshot["origen"] == "local", "Procedencia incompatible")
+          exigir(snapshot["catalogo"]["contexto"]["server_version_num"] == 170011, "Se requiere PostgreSQL 17.11 real")
+          exigir([v["aplicaciones"] for v in snapshot["historial"]["versiones"]] == [1, 1, 1, 0], "Historial incompatible")
+          exigir(snapshot["historial"]["filas_no_previstas"] == 0 and not snapshot["historial"]["orden_invalido"], "Historial ajeno o desordenado")
+          exigir(not any(snapshot["preflight"]["colisiones"].values()), "Hay objetos de la cuarta migracion o colisiones")
+          exigir(all(snapshot["preflight"]["lectura"].values()), "Captura fuera del contexto de lectura esperado")
+          exigir(all(snapshot["preflight"]["historial"].values()), "Historial no acreditado")
+          exigir(snapshot["catalogo"]["extras"] == {"relaciones": 0, "rutinas": 0}, "Objetos inesperados")
+          exigir(snapshot["catalogo"]["esquemas"] == [{"nombre": "app", "owner": "postgres"}, {"nombre": "app_private", "owner": "postgres"}], "Esquemas incompatibles")
+          tablas = [t for t in snapshot["catalogo"]["tablas"] if t["presente"]]
+          exigir(len(tablas) == 8 and all(t["rls"] and t["force_rls"] and t["owner"] == "postgres" for t in tablas), "RLS o propiedad incompatible")
+          # validar_snapshot exige las 25 identidades nominales, comandos y roles.
+          for nombre, esperado in snapshot["archivos_sha256"].items():
+              real = hashlib.sha256(Path(nombre).read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+              exigir(real == esperado, "Manifiesto distinto del checkout")
+          digests = json.loads(subprocess.check_output(["docker", "image", "inspect", "postgres:17.11", "--format", "{{json .RepoDigests}}"], text=True))
+          exigir(any(d.split("@", 1)[-1] == snapshot["imagen_digest"] for d in digests), "Digest de imagen no coincide con Docker")
+          for nombre in ("GITHUB_WORKFLOW_SHA", "GITHUB_SHA"):
+              exigir(re.fullmatch(r"[0-9a-f]{40}", os.environ[nombre]) is not None, "Falta procedencia del workflow")
+          evidencia = {
+              "formato": "tinotify_referencia_pg1711_procedencia_v1",
+              "source_commit": fuente,
+              "workflow_commit": os.environ["GITHUB_WORKFLOW_SHA"],
+              "event_commit": os.environ["GITHUB_SHA"],
+              "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "server_version_num": snapshot["catalogo"]["contexto"]["server_version_num"],
+              "imagen_digest": snapshot["imagen_digest"],
+              "referencia_sha256": hashlib.sha256(contenido).hexdigest(),
+              "manifiesto_sha256": comparador["digest"](snapshot["archivos_sha256"]),
+              "checksum_snapshot": snapshot["integridad"],
+          }
+          destino = Path(os.environ["RUNNER_TEMP"]) / "tinotify-pg1711-evidencia"
+          destino.mkdir(exist_ok=False)
+          (destino / "referencia-tres.json").write_bytes(contenido)
+          (destino / "procedencia.json").write_text(comparador["canonico"](evidencia) + "\n", encoding="utf-8")
+          print(json.dumps({"source_commit": fuente, "server_version_num": 170011, "politicas": 25, "historial": [1, 1, 1, 0], "referencia_sha256": evidencia["referencia_sha256"]}))
+          PY
+      - name: Publicar solo referencia y procedencia sinteticas
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: referencia-pg1711-${{ steps.fuente.outputs.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/tinotify-pg1711-evidencia/referencia-tres.json
+            ${{ runner.temp }}/tinotify-pg1711-evidencia/procedencia.json
+          if-no-files-found: error
+          retention-days: 3
