@@ -1,0 +1,41 @@
+name: monitor-real
+
+# Primera versión: solo manual. Para programar, descomenta `schedule` (el workflow debe estar en la rama por defecto).
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "30 7 * * *"
+  #     timezone: "America/Bogota"
+  #   - cron: "30 12 * * *"
+  #     timezone: "America/Bogota"
+  #   - cron: "30 18 * * *"
+  #     timezone: "America/Bogota"
+
+permissions: {}
+
+concurrency:
+  group: monitor-real
+  cancel-in-progress: false
+
+jobs:
+  ciclo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: backend/scripts/ciclo_monitor_actions.py
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --disable-pip-version-check httpx==0.28.1
+      - name: Revisar, enviar avisos y confirmarlos
+        env:
+          TINOTIFY_URL: ${{ vars.TINOTIFY_URL }}
+          TINOTIFY_MONITOR_TOKEN: ${{ secrets.TINOTIFY_MONITOR_TOKEN }}
+          TINOTIFY_CORREO_ACTIVO: ${{ vars.TINOTIFY_CORREO_ACTIVO }}
+          TINOTIFY_CORREO_DESTINO: ${{ secrets.TINOTIFY_CORREO_DESTINO }}
+          TINOTIFY_SMTP_USUARIO: ${{ secrets.TINOTIFY_SMTP_USUARIO }}
+          TINOTIFY_SMTP_CLAVE: ${{ secrets.TINOTIFY_SMTP_CLAVE }}
+        run: python backend/scripts/ciclo_monitor_actions.py
