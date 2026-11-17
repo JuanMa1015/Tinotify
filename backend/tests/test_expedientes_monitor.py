@@ -24,9 +24,10 @@ def test_el_listado_se_guarda_cifrado_y_la_app_lo_ve_al_instante():
     assert len(filas) == 3 and all(set(f) == {"id", "numero", "cliente", "estado", "novedades_no_vistas", "nuevo", "ultima_novedad"} for f in filas)
     assert {f["numero"] for f in filas} == {101, 202, 404} or len({f["numero"] for f in filas}) == 3
     # En la base solo hay cifrado: ni el número ni el cliente aparecen en claro.
-    guardado = json.dumps({k: [v["nonce"].hex(), v["cifrado"].hex()] for k, v in m.almacen.__dict__["expedientes_cifrados"].items()})
+    # Se compara contra los bytes cifrados (no contra su representación hexadecimal, donde "101" podría aparecer por azar).
+    brutos = b"".join(bytes(v["cifrado"]) for v in m.almacen.__dict__["expedientes_cifrados"].values())
     for f in filas:
-        assert f["cliente"] not in guardado and str(f["numero"]) not in guardado and f["id"].isalnum()
+        assert f["cliente"].encode() not in brutos and f["id"].isalnum()
 
 
 def test_requiere_el_token_de_la_app():
