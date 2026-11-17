@@ -19,6 +19,9 @@ class ServicioAvisos:
         self.almacen = almacen
 
     def pendientes(self, credencial, *, binding: UUID, limite=100) -> tuple[AvisoPendiente, ...]:
+        from tinotify.persistence.sqlite_local import AlmacenSqliteLocal
+        if isinstance(self.almacen, AlmacenSqliteLocal) and self.almacen.perfil == 'real':
+            raise PermissionError('Los eventos SIGAC reales son internos; no autorizan avisos')
         with self.almacen.transaccion(credencial,lectura=True) as unidad:
             filas = unidad.pendientes(binding,limite)
         # Solo tipo y prioridad persistidos. No reconstruir direcciones ni datos

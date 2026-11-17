@@ -22,6 +22,13 @@ node_modules/
 web-build/
 coverage/
 *.tsbuildinfo
+mobile/android/
+mobile/ios/
+*.apk
+*.aab
+google-services.json
+*service-account*.json
+credentials.json
 
 # Configuracion y secretos
 .env
@@ -84,3 +91,18 @@ estado_monitor.*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Persistencia local de desarrollo (no versionar)
+backend/.local/
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Certificados CA locales para conexiones TLS
+prod-ca-2021.crt
+
+# Secretos del backend real remoto (Secret Files de Render) y acceso local: nunca versionar, en ninguna carpeta
+acreditacion_sigac*.json
+referencia_portable*.json
+codigo_acceso_real*

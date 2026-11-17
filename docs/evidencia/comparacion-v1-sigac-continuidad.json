@@ -1,0 +1,19 @@
+{
+  "alcance": "continuidad_observada_en_instancia",
+  "casos_listados": 15,
+  "apariciones_en_listado": 1,
+  "detalle_validado": true,
+  "huellas_v1": 709,
+  "huellas_lectura": 709,
+  "contenidas_con_multiplicidad": 709,
+  "v1_ausentes_en_lectura": 0,
+  "adicionales_en_lectura": 0,
+  "huellas_compatibles": true,
+  "version_huella_codigo": 1,
+  "persistencia": "ninguna",
+  "v1_modificado": false,
+  "veredicto": "continuidad_observada",
+  "lecturas_reales": 1,
+  "origen": "Resultado impreso por backend/scripts/comparar_v1_sigac.py y transcrito por la persona operadora; sin numeros de expediente, nombres, descripciones ni credenciales.",
+  "no_demuestra": ["unicidad_global", "ausencia_de_reutilizacion", "estabilidad_futura_del_numero"]
+}
