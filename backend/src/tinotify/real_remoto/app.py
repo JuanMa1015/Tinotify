@@ -8,6 +8,7 @@ llegan solo en el cuerpo de `POST /real/sesion` por HTTPS, se usan en memoria y 
 """
 
 from contextlib import asynccontextmanager
+import json
 import logging
 import time
 from typing import Annotated
@@ -157,8 +158,9 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         except SigacClientError as error:
             # Diagnóstico para quien opera el servicio: solo valores de catálogos cerrados (código, etapa y, si hubo un fallo
             # de transporte, el NOMBRE de la clase de la excepción). Nunca mensajes, URLs, cabeceras ni credenciales.
+            causa = getattr(error, "causa", None)
             registro.warning("sigac_fallo codigo=%s etapa=%s causa=%s", error.codigo.value, error.etapa.value,
-                             getattr(error, "causa", None))
+                             json.dumps(causa, sort_keys=True) if isinstance(causa, dict) else causa)
             if isinstance(error, SigacSessionExpired) or error.codigo in _ACCESO_RECHAZADO:
                 raise HTTPException(403, "Acceso no confirmado") from None
             raise HTTPException(502, "El servicio institucional no respondió como se esperaba") from None

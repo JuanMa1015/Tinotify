@@ -11,7 +11,7 @@ from tinotify.integrations.sigac.sigac_identidad import ErrorIdentidadRespuesta,
 from tinotify.integrations.sigac.lectura_validada import HistorialSigac
 from tinotify.integrations.sigac.sigac_respuestas import (
     RespuestaIncompleta, destino_confirmado, destino_login_confirmado, es_acceso, es_selector, leer_acceso,
-    pagina_protegida, verificar_selector_estudiante,
+    estructura_documento, pagina_protegida, verificar_selector_estudiante,
 )
 from tinotify.parsers.casos_parser import extraer_casos
 from tinotify.parsers.parser import ErrorParseoHistorial, estadisticas_documento, parse_actuaciones
@@ -273,7 +273,12 @@ class SigacClient:
             verificar_selector_estudiante(self._html(self._solicitar("GET", selector), permitir_selector=True))
             destino = self.seleccionar_rol(RolSigac.ESTUDIANTE)
             self.contexto.marcar(EtapaSigac.PRINCIPAL)
-            pagina_protegida(self.obtener_html(destino))
+            html_principal = self.obtener_html(destino)
+            try:
+                pagina_protegida(html_principal)
+            except RespuestaIncompleta as error:
+                error.estructura = estructura_documento(html_principal)  # solo conteos/booleanos, para diagnosticar
+                raise
             # Ni el 302, ni la cookie, ni la principal acreditan por sí solos acceso.
             self.contexto.marcar(EtapaSigac.LISTADO_INICIAL)
             casos = self._leer_listado(total_casos_esperado, estructural=listado_estructural)
@@ -281,8 +286,10 @@ class SigacClient:
             completado = True
             return casos
         except RespuestaIncompleta as error:
-            raise SigacClientError("El formulario o la respuesta no cumplen el contrato confirmado.",
-                                   codigo=error.codigo, etapa=self.contexto.etapa) from None
+            fallo = SigacClientError("El formulario o la respuesta no cumplen el contrato confirmado.",
+                                     codigo=error.codigo, etapa=self.contexto.etapa)
+            fallo.causa = getattr(error, "estructura", None)
+            raise fallo from None
         except SigacClientError as error:
             self._anotar_error(error)
             raise

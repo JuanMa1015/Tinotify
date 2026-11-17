@@ -72,6 +72,20 @@ def es_selector(html):
     return any("sesion.cambiar.ses" in str(f.get("action", "")).lower() for f in soup.find_all("form"))
 
 
+def estructura_documento(html):
+    """Rasgos ESTRUCTURALES de un documento (booleanos y conteos). Nunca texto, atributos, URLs ni cabeceras."""
+    if not isinstance(html, str):
+        return {"tipo": type(html).__name__}
+    fin = list(re.finditer(r"</html\s*>", html, re.I))
+    resto = re.sub(r"<!--.*?-->|\s+", "", html[fin[-1].end():], flags=re.S) if fin else ""
+    cuenta = lambda patron: len(re.findall(patron, html, re.I))
+    primero = re.search(r"<\s*([a-zA-Z][a-zA-Z0-9]*)", html)
+    return {"largo": len(html), "html_abre": cuenta(r"<html"), "html_cierra": len(fin), "body_abre": cuenta(r"<body"),
+            "body_cierra": cuenta(r"</body\s*>"), "caracteres_tras_html": len(resto), "formularios": cuenta(r"<form"),
+            "tablas": cuenta(r"<table"), "scripts": cuenta(r"<script"), "enlaces": cuenta(r"<a"),
+            "primer_elemento": primero.group(1).lower() if primero else None, "vacio": not html.strip()}
+
+
 def documento_completo(html):
     soup = BeautifulSoup(html, "html.parser")
     if (soup.html is None or soup.body is None or not re.search(r"</body\s*>", html, re.I)

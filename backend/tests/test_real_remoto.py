@@ -695,3 +695,35 @@ def test_un_fallo_de_sigac_se_registra_solo_con_codigos_de_catalogo(entorno, cap
     assert mensajes == ["sigac_fallo codigo=fallo_transporte_o_codificacion etapa=formulario_acceso causa=ConnectError"]
     todo = " ".join(x.getMessage() for x in caplog.records)
     assert not any(s in todo for s in ("sigac.udea", "cookie-secreta", "usuario-secreto", "clave-secreta"))
+
+
+
+
+def test_una_pagina_principal_incompleta_se_diagnostica_solo_con_rasgos_estructurales(entorno, caplog):
+    from backend.tests.test_integridad_historial_sigac import COOKIE, SELECTOR
+
+    def sigac(peticion):
+        ruta = peticion.url.path.removeprefix("/sigac/")
+        cab = {"content-type": "text/html"}
+        if ruta == "index.jsp":
+            return httpx.Response(200, headers=cab, text=FORMULARIO)
+        if ruta == "sesion.validar.ses":
+            return httpx.Response(302, headers={"location": "general.principal.con",
+                                                "set-cookie": f"JSESSIONID={COOKIE}; Path=/sigac/; Secure; HttpOnly"})
+        if ruta == "general.formCambiarTipoUsuario.con":
+            return httpx.Response(200, headers=cab, text=SELECTOR)
+        if ruta == "sesion.cambiar.ses":
+            return httpx.Response(302, headers={"location": "general.principal.con"})
+        # Principal malformada: sin </body> y con texto tras </html>. El texto debe quedar fuera del diagnóstico.
+        return httpx.Response(200, headers=cab, text="<html><body><p>TEXTO-INSTITUCIONAL-PRIVADO</p></html>PUBLICIDAD-INYECTADA")
+    c = servidor_de_error(entorno, sigac)
+    caplog.set_level(logging.WARNING)
+    r = login(c, "usuario-secreto", "clave-secreta")
+    assert r.status_code == 502
+    linea = [x.getMessage() for x in caplog.records if x.name == "tinotify.real_remoto"][0]
+    assert linea.startswith("sigac_fallo codigo=documento_incompleto etapa=pagina_principal causa=")
+    datos = json.loads(linea.split("causa=", 1)[1])
+    assert datos["body_cierra"] == 0 and datos["html_cierra"] == 1 and datos["caracteres_tras_html"] == len("PUBLICIDAD-INYECTADA")
+    assert datos["primer_elemento"] == "html" and datos["formularios"] == 0 and datos["largo"] > 20
+    todo = " ".join(x.getMessage() for x in caplog.records)
+    assert not any(s in todo for s in ("TEXTO-INSTITUCIONAL", "PUBLICIDAD", "usuario-secreto", "clave-secreta", COOKIE))
