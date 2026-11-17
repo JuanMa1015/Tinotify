@@ -69,3 +69,24 @@ test('los canales del aviso dicen por dónde salió y si falló', () => {
   assert.equal(canalesDeAviso({ push: null, correo: null })[0].texto, 'Correo en espera del próximo envío');
   assert.equal(canalesDeAviso({ push: 'sin_dispositivos', correo: 'desactivado' })[0].texto, 'Notificación: sin teléfonos registrados');
 });
+
+import { parsearDescripcion, tipoDireccion } from '../src/revisiones.ts';
+
+test('las actuaciones con formato de formulario se separan en etiqueta y valor', () => {
+  const crudo = 'TINOTIFY_FILAS_V1:' + JSON.stringify({ filas: [['Aprobada por', 'PERSONA FICTICIA'], ['Hechos', 'PRIMERO. Uno.\nSEGUNDO. Dos.']] });
+  const d = parsearDescripcion(crudo);
+  assert.equal(d.tipo, 'filas');
+  if (d.tipo === 'filas') {
+    assert.deepEqual(d.filas.map(f => f.etiqueta), ['Aprobada por', 'Hechos']);
+    assert.equal(d.filas[1].valor, 'PRIMERO. Uno.\nSEGUNDO. Dos.');
+  }
+  for (const raro of ['texto normal', 'TINOTIFY_FILAS_V1:{no es json', 'TINOTIFY_FILAS_V1:{"filas":"x"}', 'TINOTIFY_FILAS_V1:{"filas":[["solo uno"]]}', 'TINOTIFY_FILAS_V1:{"filas":[]}']) {
+    assert.deepEqual(parsearDescripcion(raro), { tipo: 'texto', texto: raro });
+  }
+});
+
+test('la dirección de la actuación se reconoce sin importar mayúsculas', () => {
+  assert.equal(tipoDireccion('ESTUDIANTE', 'ASESOR'), 'estudiante_asesor');
+  assert.equal(tipoDireccion(' Asesor ', 'estudiante'), 'asesor_estudiante');
+  assert.equal(tipoDireccion('X', 'Y'), 'otra');
+});
