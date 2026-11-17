@@ -99,7 +99,7 @@ class SigacClient:
     def _solicitar(self, metodo, ruta, *, datos=None):
         """Lee con límite; nunca propaga excepciones HTTP con request sensible."""
         ruta = self._validar_ruta(ruta)
-        resultado = None
+        resultado = causa = None
         try:
             with self.http.stream(metodo, ruta, data=datos, follow_redirects=False) as respuesta:
                 partes, longitud = [], 0
@@ -120,11 +120,13 @@ class SigacClient:
                                                codigo=CodigoHistorial.LONGITUD_RESPUESTA)
                 resultado = (respuesta.status_code, respuesta.headers,
                              contenido.decode(respuesta.encoding or "utf-8", errors="strict"))
-        except (httpx.HTTPError, UnicodeError, LookupError):
-            pass
+        except (httpx.HTTPError, UnicodeError, LookupError) as error:
+            causa = type(error).__name__  # solo el nombre de la clase (p. ej. ConnectError): sin mensaje, URL ni cabeceras
         if resultado is None:
-            raise SigacClientError("Error de comunicación o codificación; no se procesó la respuesta.",
-                                   codigo=CodigoHistorial.TRANSPORTE)
+            fallo = SigacClientError("Error de comunicación o codificación; no se procesó la respuesta.",
+                                     codigo=CodigoHistorial.TRANSPORTE)
+            fallo.causa = causa
+            raise fallo
         return resultado
 
     def _html(self, respuesta, *, permitir_acceso=False, permitir_selector=False):

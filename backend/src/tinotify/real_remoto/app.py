@@ -155,6 +155,10 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         except IdentidadExpedienteNoVerificada:
             raise HTTPException(503, "Servicio no configurado") from None
         except SigacClientError as error:
+            # Diagnóstico para quien opera el servicio: solo valores de catálogos cerrados (código, etapa y, si hubo un fallo
+            # de transporte, el NOMBRE de la clase de la excepción). Nunca mensajes, URLs, cabeceras ni credenciales.
+            registro.warning("sigac_fallo codigo=%s etapa=%s causa=%s", error.codigo.value, error.etapa.value,
+                             getattr(error, "causa", None))
             if isinstance(error, SigacSessionExpired) or error.codigo in _ACCESO_RECHAZADO:
                 raise HTTPException(403, "Acceso no confirmado") from None
             raise HTTPException(502, "El servicio institucional no respondió como se esperaba") from None

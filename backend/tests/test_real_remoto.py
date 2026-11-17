@@ -682,3 +682,16 @@ def test_el_verificador_de_la_rama_detecta_rutas_secretos_y_texto_judicial():
     assert "backend/src/ok.py" not in json.dumps(problemas) and "backend/.env.example" not in json.dumps(problemas)
     assert v.pertenece("backend/src/x.py") and v.pertenece("docs/a.md") and v.pertenece("render.yaml")
     assert not any(v.pertenece(r) for r in ("mobile/App.tsx", "supabase/config.toml", "package.json", "otra/cosa.py"))
+
+
+def test_un_fallo_de_sigac_se_registra_solo_con_codigos_de_catalogo(entorno, caplog):
+    def sin_red(peticion):
+        raise httpx.ConnectError("detalle con https://sigac.udea.edu.co y cookie-secreta y usuario-secreto")
+    c = servidor_de_error(entorno, sin_red)
+    caplog.set_level(logging.WARNING)
+    r = login(c, "usuario-secreto", "clave-secreta")
+    assert r.status_code == 502
+    mensajes = [x.getMessage() for x in caplog.records if x.name == "tinotify.real_remoto"]
+    assert mensajes == ["sigac_fallo codigo=fallo_transporte_o_codificacion etapa=formulario_acceso causa=ConnectError"]
+    todo = " ".join(x.getMessage() for x in caplog.records)
+    assert not any(s in todo for s in ("sigac.udea", "cookie-secreta", "usuario-secreto", "clave-secreta"))
