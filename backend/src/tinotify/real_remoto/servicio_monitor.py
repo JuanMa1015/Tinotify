@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 
 from tinotify.demo.novedades import INSTANCIA_REAL
 from tinotify.integrations.sigac.sigac_client import SigacClientError, SigacSessionExpired
@@ -9,12 +10,19 @@ from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.almacen import AlmacenNoDisponible
 from tinotify.real_remoto.cifrado import (
     CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, descifrar_credenciales, descifrar_expediente)
-from tinotify.real_remoto.monitor import caso_ref, leer_expedientes
+from tinotify.real_remoto.monitor import caso_ref, leer_expedientes, leer_un_expediente
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
 registro = logging.getLogger("tinotify.real_remoto")
 _ACCESO_RECHAZADO = {CodigoHistorial.AUTENTICACION_NO_CONFIRMADA, CodigoHistorial.SESION_NO_CONFIRMADA,
                      CodigoHistorial.ACCESO_INCOMPLETO}
+
+
+CACHE_DETALLE_S = 300
+
+
+class ExpedienteNoEncontrado(Exception):
+    """El expediente no está en el listado guardado."""
 
 
 class SinCredenciales(Exception):
@@ -26,6 +34,7 @@ class ServicioMonitor:
         self._config, self._almacen, self._sesiones, self._fcm = config, almacen, sesiones, fcm
         self._referencia, self._clave = referencia, clave_acreditacion
         self._llave = config.monitor.clave_cifrado
+        self._cache = {}  # caso_ref -> (instante, actuaciones): evita iniciar sesión en SIGAC por cada toque
 
     def guardar_credenciales(self, usuario, clave, caso_login=None):
         nonce, cifrado = cifrar_credenciales(self._llave, usuario, clave, caso_login)
@@ -41,18 +50,20 @@ class ServicioMonitor:
         """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Solo conteos: nunca radicados
         ni nombres, porque el texto se ve en la pantalla de bloqueo."""
         if self._fcm is None:
-            return
+            return "no_configurado"
         cuerpo, pestana = _texto_push(plan)
-        self._enviar_a_dispositivos(cuerpo, {"tipo": "novedades", "pestana": pestana})
+        enviados, invalidos, errores = self._enviar_a_dispositivos(cuerpo, {"tipo": "novedades", "pestana": pestana})
+        return "enviado" if enviados else "fallido" if (invalidos or errores) else "sin_dispositivos"
 
     def enviar_prueba(self):
         """Notificación de prueba a los dispositivos registrados. No toca expedientes, avisos ni estado. (enviados, inválidos) o None sin FCM."""
         if self._fcm is None:
             return None
-        return self._enviar_a_dispositivos("Notificación de prueba: tu teléfono recibe los avisos de Tinotify.", {"tipo": "prueba", "pestana": "inicio"})
+        enviados, invalidos, _ = self._enviar_a_dispositivos("Notificación de prueba: tu teléfono recibe los avisos de Tinotify.", {"tipo": "prueba", "pestana": "inicio"})
+        return enviados, invalidos
 
     def _enviar_a_dispositivos(self, cuerpo, datos):
-        enviados = invalidos = 0
+        enviados = invalidos = errores = 0
         try:
             for token in self._almacen.dispositivos():
                 resultado = self._fcm.enviar(token, "Tinotify", cuerpo, datos)
@@ -61,9 +72,12 @@ class ServicioMonitor:
                 elif resultado == "token_invalido":
                     invalidos += 1
                     self._almacen.borrar_dispositivo(token)
+                else:
+                    errores += 1
         except AlmacenNoDisponible:
             registro.warning("push_sin_almacen")
-        return enviados, invalidos
+            errores += 1
+        return enviados, invalidos, errores
 
     # --- expedientes (listado cifrado) ---------------------------------------------------------------------------------
     def _guardar_expedientes(self, plan, metadatos):
@@ -91,6 +105,36 @@ class ServicioMonitor:
                            "novedades_no_vistas": no_vistas, "nuevo": nuevo, "ultima_novedad": ultima})
         salida.sort(key=lambda e: (-(e["novedades_no_vistas"] > 0), -e["numero"]))
         return salida
+
+    def canal_aviso(self, aviso, canal, estado):
+        return self._almacen.fijar_canal_aviso(aviso, canal, estado)
+
+    def historial_expediente(self, caso_ref):
+        """Actuaciones de UN expediente leídas de SIGAC en este momento (inicia sesión con las credenciales guardadas). No se guardan."""
+        antes = time.monotonic()
+        guardado = self._cache.get(caso_ref)
+        if guardado and antes - guardado[0] < CACHE_DETALLE_S:
+            return guardado[1]
+        fila = next((f for f in self._almacen.expedientes() if f[0] == caso_ref), None)
+        if fila is None:
+            raise ExpedienteNoEncontrado
+        try:
+            numero, _, _ = descifrar_expediente(self._llave, caso_ref, fila[2], fila[3])
+        except CifradoNoValido:
+            raise ExpedienteNoEncontrado from None
+        credenciales = self._almacen.credenciales()
+        if credenciales is None:
+            raise SinCredenciales
+        usuario, clave, caso_login = descifrar_credenciales(self._llave, credenciales[1], credenciales[2])
+        cfg = self._config
+        try:
+            actuaciones = self._sesiones.con_cliente(lambda cliente: leer_un_expediente(
+                cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login, numero=numero))
+        finally:
+            del usuario, clave, caso_login
+        datos = [_actuacion_json(a) for a in sorted(actuaciones, key=lambda a: a.fecha, reverse=True)]
+        self._cache[caso_ref] = (time.monotonic(), datos)
+        return datos
 
     def marcar_vistos(self, caso_ref=None):
         return self._almacen.marcar_vistos(caso_ref)
@@ -153,7 +197,11 @@ class ServicioMonitor:
             raise
         self._guardar_expedientes(plan, metadatos)
         if aviso:
-            self._notificar_push(plan)
+            estado_push = self._notificar_push(plan)
+            try:
+                self._almacen.fijar_canal_aviso(aviso, "push", estado_push)
+            except AlmacenNoDisponible:
+                registro.warning("canal_aviso_sin_almacen")
         self._cerrar(ejecucion, plan.resultado, expedientes=min(plan.expedientes, 1000), novedades=min(plan.novedades, 100000),
                      codigo="casos_fallidos" if fallidos else None)
         return {"resultado": plan.resultado, "expedientes": plan.expedientes, "novedades": plan.novedades,
@@ -177,3 +225,9 @@ def _texto_push(plan):
         return ("Apareció un expediente nuevo en tu cuenta" if plan.expedientes_nuevos == 1
                 else f"Aparecieron {plan.expedientes_nuevos} expedientes nuevos en tu cuenta"), "casos"
     return "Una lectura necesita tu revisión en SIGAC", "actividad"
+
+
+def _actuacion_json(a):
+    return {"fecha": a.fecha.isoformat(), "etapa": a.etapa, "origen": a.origen, "destino": a.destino, "remitente": a.remitente,
+            "descripcion": a.descripcion[:20000],
+            "anexos": [{"descripcion": x.descripcion, "archivo": x.archivo, "sin_enlace": x.sin_enlace} for x in a.anexos]}

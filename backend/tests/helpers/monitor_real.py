@@ -142,9 +142,20 @@ class AlmacenMemoria:
 
     def ejecuciones_recientes(self, limite):
         self._vivo()
+        canales = self.__dict__.get("canales", {})
+        ultimo_aviso = max(self.avisos.values(), key=lambda a: a["orden"]) if self.avisos else None
         return [{"inicio": "2026-11-17T12:30:00+00:00", "fin": "2026-11-17T12:33:00+00:00", "resultado": e["resultado"],
-                 "expedientes": e["expedientes"], "novedades": e["novedades"], "codigo": e["codigo"]}
+                 "expedientes": e["expedientes"], "novedades": e["novedades"], "codigo": e["codigo"],
+                 "aviso": ({"push": canales.get((ultimo_aviso["id"], "push")), "correo": canales.get((ultimo_aviso["id"], "correo"))}
+                           if ultimo_aviso and e is self.ejecuciones[-1] else None)}
                 for e in reversed(self.ejecuciones)][:limite]
+
+    def fijar_canal_aviso(self, aviso, canal, estado):
+        self._vivo()
+        if aviso not in self.avisos:
+            return False
+        self.__dict__.setdefault("canales", {})[(aviso, canal)] = estado
+        return True
 
     def guardar_expedientes(self, filas):
         self._vivo()

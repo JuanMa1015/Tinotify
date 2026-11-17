@@ -157,13 +157,25 @@ class AlmacenPg:
             return con.execute("DELETE FROM tinotify_real.dispositivos WHERE token = %s", (token,)).rowcount > 0
 
     def ejecuciones_recientes(self, limite):
-        """Últimas ejecuciones, de la más reciente a la más antigua: solo estados de catálogo y conteos."""
+        """Últimas ejecuciones, de la más reciente a la más antigua: solo estados de catálogo y conteos, más el estado de los canales
+        del aviso que esa ejecución creó (si creó alguno)."""
         with self._tx() as con:
             filas = con.execute(
-                "SELECT inicio, fin, resultado, expedientes, novedades, codigo FROM tinotify_real.ejecuciones "
-                "ORDER BY inicio DESC LIMIT %s", (max(1, min(int(limite), 100)),)).fetchall()
+                "SELECT e.inicio, e.fin, e.resultado, e.expedientes, e.novedades, e.codigo, a.id IS NOT NULL, a.push_estado, a.correo_estado "
+                "FROM tinotify_real.ejecuciones e LEFT JOIN LATERAL ("
+                "  SELECT id, push_estado, correo_estado FROM tinotify_real.avisos x "
+                "  WHERE x.creado_en >= e.inicio AND x.creado_en <= coalesce(e.fin, e.inicio + interval '15 minutes') "
+                "  ORDER BY x.creado_en LIMIT 1) a ON true "
+                "ORDER BY e.inicio DESC LIMIT %s", (max(1, min(int(limite), 100)),)).fetchall()
         return [{"inicio": f[0].isoformat(), "fin": f[1].isoformat() if f[1] else None, "resultado": f[2],
-                 "expedientes": f[3], "novedades": f[4], "codigo": f[5]} for f in filas]
+                 "expedientes": f[3], "novedades": f[4], "codigo": f[5],
+                 "aviso": {"push": f[7], "correo": f[8]} if f[6] else None} for f in filas]
+
+    def fijar_canal_aviso(self, aviso, canal, estado):
+        """Registra cómo salió un aviso por un canal. `canal` es push o correo (lista cerrada)."""
+        columna = {"push": "push_estado", "correo": "correo_estado"}[canal]
+        with self._tx() as con:
+            return con.execute(f"UPDATE tinotify_real.avisos SET {columna} = %s WHERE id = %s", (estado, aviso)).rowcount > 0
 
     # --- listado de expedientes (cifrado) ------------------------------------------------------------------------------
     def guardar_expedientes(self, filas):
