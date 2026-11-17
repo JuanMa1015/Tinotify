@@ -1,15 +1,15 @@
 name: monitor-real
 
-# Primera versión: solo manual. Para programar, descomenta `schedule` (el workflow debe estar en la rama por defecto).
+# Manual y programado (hora de Bogotá). GitHub puede retrasar los cron unos minutos.
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: "30 7 * * *"
-  #     timezone: "America/Bogota"
-  #   - cron: "30 12 * * *"
-  #     timezone: "America/Bogota"
-  #   - cron: "30 18 * * *"
-  #     timezone: "America/Bogota"
+  schedule:
+    - cron: "30 7 * * *"
+      timezone: "America/Bogota"
+    - cron: "30 12 * * *"
+      timezone: "America/Bogota"
+    - cron: "30 18 * * *"
+      timezone: "America/Bogota"
 
 permissions: {}
 
