@@ -45,7 +45,25 @@ export function horaBogota(iso: string): string {
   return new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: false, timeZone: 'America/Bogota' }).format(d);
 }
 
-export type Ejecucion = { inicio: string; fin: string | null; resultado: string; expedientes: number | null; novedades: number | null; codigo: string | null };
+export type EstadoAviso = { push: string | null; correo: string | null };
+export type Ejecucion = { inicio: string; fin: string | null; resultado: string; expedientes: number | null; novedades: number | null; codigo: string | null; aviso?: EstadoAviso | null };
+
+export type Canal = { texto: string; ok: boolean };
+
+/** Cómo salió el aviso de una revisión, canal por canal (solo si esa revisión creó un aviso). */
+export function canalesDeAviso(aviso: EstadoAviso | null | undefined): Canal[] {
+  if (!aviso) return [];
+  const push: Record<string, Canal> = {
+    enviado: { texto: 'Notificación enviada', ok: true }, fallido: { texto: 'Notificación no entregada', ok: false },
+    sin_dispositivos: { texto: 'Notificación: sin teléfonos registrados', ok: false }, no_configurado: { texto: 'Notificaciones no configuradas', ok: false } };
+  const correo: Record<string, Canal> = {
+    enviado: { texto: 'Correo enviado', ok: true }, fallido: { texto: 'Correo no enviado', ok: false }, desactivado: { texto: 'Correo desactivado', ok: false } };
+  const salida: Canal[] = [];
+  if (aviso.push && push[aviso.push]) salida.push(push[aviso.push]);
+  salida.push(aviso.correo && correo[aviso.correo] ? correo[aviso.correo] : { texto: 'Correo en espera del próximo envío', ok: true });
+  return salida;
+}
+
 
 const ZONA = 'America/Bogota';
 const partes = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);

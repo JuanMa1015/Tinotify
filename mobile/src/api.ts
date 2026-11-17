@@ -52,3 +52,11 @@ export type Expediente = { id: string; numero: number; cliente: string; estado: 
 export const obtenerExpedientes = (token: string) => solicitar<{ expedientes: Expediente[] }>('/real/expedientes', token, { limiteMs: 90000 });
 export const marcarVistos = (token: string, id?: string) => solicitar<{ actualizados: number }>('/real/expedientes/vistos', token, { cuerpo: id ? { id } : {} });
 export const enviarPrueba = (token: string) => solicitar<{ enviados: number; invalidos: number }>('/real/dispositivos/prueba', token, { cuerpo: {}, limiteMs: 60000 });
+
+export type Actuacion = {
+  fecha: string; etapa: string; origen: string; destino: string; remitente: string; descripcion: string;
+  anexos: { descripcion: string; archivo: string; sin_enlace: boolean }[];
+};
+// Lee SIGAC en ese momento a través del servidor (inicia sesión con tus credenciales guardadas): puede tardar hasta un minuto.
+export const obtenerActuaciones = (token: string, id: string) =>
+  solicitar<{ actuaciones: Actuacion[] }>(`/real/expedientes/${id}/actuaciones`, token, { limiteMs: 150000 });
