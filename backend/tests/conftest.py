@@ -65,3 +65,10 @@ def actuacion_ficticia(politica_sintetica, contrato_sintetico):
         return replace(base, **cambios)
 
     return crear
+
+
+@pytest.fixture(autouse=True)
+def _sin_clave_local_de_acreditacion(monkeypatch, tmp_path_factory):
+    """Las pruebas nunca leen la clave local real de acreditación, aunque exista en backend/.local."""
+    from tinotify.services import politica_real_local
+    monkeypatch.setattr(politica_real_local, "RUTA_ACREDITACION", tmp_path_factory.getbasetemp() / "sin-acreditacion.json")
