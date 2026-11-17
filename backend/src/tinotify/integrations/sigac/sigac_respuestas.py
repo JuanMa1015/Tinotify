@@ -98,10 +98,33 @@ def estructura_documento(html):
 
 
 
+
+def _termina_en_html(html):
+    """True si tras el ÚLTIMO `</html>` solo hay espacios y comentarios completos hasta el final.
+
+    Equivale a la expresión `</html\s*>\s*(?:<!--.*?-->\s*)*$` pero en tiempo lineal: esa forma, con un cuantificador anidado
+    sobre texto no confiable, puede retroceder de manera catastrófica."""
+    ultimo = None
+    for ultimo in re.finditer(r"</html\s*>", html, re.I):
+        pass
+    if ultimo is None:
+        return False
+    resto = html[ultimo.end():]
+    while True:
+        resto = resto.lstrip()
+        if not resto:
+            return True
+        if not resto.startswith("<!--"):
+            return False
+        fin = resto.find("-->", 4)
+        if fin < 0:
+            return False
+        resto = resto[fin + 3:]
+
 def documento_completo(html):
     soup = BeautifulSoup(html, "html.parser")
     if (soup.html is None or soup.body is None or not re.search(r"</body\s*>", html, re.I)
-            or not re.search(r"</html\s*>\s*(?:<!--.*?-->\s*)*$", html, re.I | re.S)):
+            or not _termina_en_html(html)):
         raise RespuestaIncompleta("Documento incompleto o estructura no confirmada.",
                                  codigo=CodigoHistorial.DOCUMENTO_INCOMPLETO)
     return soup
@@ -194,6 +217,6 @@ def pagina_principal(html):
     cuerpo = re.search(r"<body\b", html, re.I) and re.search(r"</body\s*>", html, re.I)
     marcos = re.search(r"<frameset\b", html, re.I) and re.search(r"</frameset\s*>", html, re.I)
     if (not re.search(r"<html\b", html, re.I) or not (cuerpo or marcos)
-            or not re.search(r"</html\s*>\s*(?:<!--.*?-->\s*)*$", html, re.I | re.S)):
+            or not _termina_en_html(html)):
         raise RespuestaIncompleta("Documento incompleto o estructura no confirmada.",
                                  codigo=CodigoHistorial.DOCUMENTO_INCOMPLETO)

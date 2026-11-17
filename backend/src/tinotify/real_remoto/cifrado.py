@@ -40,3 +40,31 @@ def descifrar_credenciales(llave, nonce, cifrado):
     except (InvalidTag, ValueError, KeyError, TypeError, UnicodeError):
         raise CifradoNoValido("descifrado") from None
     return usuario, clave, caso_login
+
+
+def _aad_expediente(caso_ref):
+    return b"tinotify-real|expediente|v1|" + caso_ref.encode("ascii")
+
+
+def cifrar_expediente(llave, caso_ref, numero, cliente, estado):
+    """Datos del listado de SIGAC de un expediente, cifrados y ligados a su `caso_ref` (no se pueden mover a otra fila)."""
+    if not isinstance(llave, (bytes, bytearray)) or len(llave) != 32 or not isinstance(caso_ref, str) or not caso_ref.isascii():
+        raise CifradoNoValido("llave")
+    if not isinstance(numero, int) or not isinstance(cliente, str) or not isinstance(estado, str):
+        raise CifradoNoValido("datos")
+    nonce = os.urandom(12)
+    claro = json.dumps({"numero": numero, "cliente": cliente[:300], "estado": estado[:100]}, separators=(",", ":")).encode("utf-8")
+    return nonce, AESGCM(bytes(llave)).encrypt(nonce, claro, _aad_expediente(caso_ref))
+
+
+def descifrar_expediente(llave, caso_ref, nonce, cifrado):
+    if not isinstance(llave, (bytes, bytearray)) or len(llave) != 32:
+        raise CifradoNoValido("llave")
+    try:
+        datos = json.loads(AESGCM(bytes(llave)).decrypt(bytes(nonce), bytes(cifrado), _aad_expediente(caso_ref)).decode("utf-8"))
+        numero, cliente, estado = datos["numero"], datos["cliente"], datos["estado"]
+        if not (isinstance(numero, int) and isinstance(cliente, str) and isinstance(estado, str)) or set(datos) - {"numero", "cliente", "estado"}:
+            raise ValueError
+    except (InvalidTag, ValueError, KeyError, TypeError, UnicodeError):
+        raise CifradoNoValido("descifrado") from None
+    return numero, cliente, estado

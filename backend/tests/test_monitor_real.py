@@ -277,7 +277,9 @@ def test_primera_ejecucion_linea_base_luego_novedades_expediente_nuevo_y_confirm
     assert d["aviso_nuevo"] and [a["id"] for a in d["avisos"]] == [d["aviso_nuevo"]]
     aviso = d["avisos"][0]
     assert (aviso["novedades"], aviso["expedientes_con_novedades"], aviso["expedientes_nuevos"]) == (3, 2, 1)
-    texto = json.dumps(d)
+    # Los UUID de los avisos son aleatorios y pueden contener por azar "101", "202" o "404": se excluyen del texto inspeccionado.
+    sin_ids = {**d, "aviso_nuevo": None, "avisos": [{k: v for k, v in a.items() if k != "id"} for a in d["avisos"]]}
+    texto = json.dumps(sin_ids)
     assert not any(s in texto for s in ("POSTERIOR", "NUEVO_EXPEDIENTE", "EXPEDIENTE_A", "101", "202", "404", m.sim.usuario, m.sim.clave))
     # Sin confirmar, el aviso sigue pendiente (se repite en la siguiente revisión, nunca se pierde) y no se duplica la novedad.
     d2 = m.ejecutar().json()
@@ -477,3 +479,21 @@ def test_un_anexo_sin_enlace_rechazado_se_diagnostica_solo_con_conteos_estructur
     assert len(conteos) == 1 and all(type(v) is int for v in conteos[0].values()) and "anexo_ausente_celdas_th" in conteos[0]
     todo = " ".join(mensajes)
     assert not any(s in todo for s in ("ANEXO_PRIVADO", "202", m.sim.usuario, m.sim.clave))
+
+
+def test_el_historial_de_ejecuciones_exige_el_token_de_la_app_y_solo_trae_estados_y_conteos():
+    m = Mundo(casos_base())
+    m.guardar_credenciales()
+    assert m.ejecutar().status_code == 200 and m.ejecutar().status_code == 200
+    cab = CAB
+    assert m.c.get("/real/monitor/ejecuciones").status_code == 401
+    assert m.c.get("/real/monitor/ejecuciones", headers={"Authorization": f"Bearer {TOKEN_MONITOR}"}).status_code == 401  # tokens separados
+    r = m.c.get("/real/monitor/ejecuciones?limite=1", headers=cab)
+    assert r.status_code == 200 and len(r.json()["ejecuciones"]) == 1
+    fila = m.c.get("/real/monitor/ejecuciones", headers=cab).json()["ejecuciones"][0]
+    assert set(fila) == {"inicio", "fin", "resultado", "expedientes", "novedades", "codigo"}
+    assert fila["resultado"] in ("ok", "linea_base")
+    assert m.c.get("/real/monitor/ejecuciones?limite=0", headers=cab).status_code == 422
+    assert m.c.get("/real/monitor/ejecuciones?limite=101", headers=cab).status_code == 422
+    m.almacen.caido = True
+    assert m.c.get("/real/monitor/ejecuciones", headers=cab).status_code == 503

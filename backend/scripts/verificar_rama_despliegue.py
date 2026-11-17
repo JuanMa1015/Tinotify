@@ -123,6 +123,13 @@ def fragmentos_judiciales(raiz, maximo=1500, local=None):
     return fragmentos
 
 
+def _referencia_git(valor):
+    """Solo nombres de referencia simples: nunca una opción de git (que empiece por guion) ni caracteres de shell."""
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}", valor):
+        raise argparse.ArgumentTypeError("referencia de git no válida")
+    return valor
+
+
 def _git(raiz, *args):
     return subprocess.run(["git", *args], cwd=raiz, capture_output=True, text=True, check=True).stdout
 
@@ -130,7 +137,7 @@ def _git(raiz, *args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Verifica el contenido previsto de la rama de despliegue (sin crear nada)")
     parser.add_argument("--listar", action="store_true", help="imprime las rutas incluidas (no su contenido)")
-    parser.add_argument("--base", default="origin/main")
+    parser.add_argument("--base", default="origin/main", type=_referencia_git)
     parser.add_argument("--local", type=Path, help="carpeta `.local` con los secretos de este equipo (por defecto <raiz>/backend/.local)")
     args = parser.parse_args(argv)
     raiz = Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").strip())
