@@ -140,6 +140,33 @@ class AlmacenMemoria:
         return [{k: v for k, v in a.items() if k not in ("entregado", "orden")}
                 for a in sorted(self.avisos.values(), key=lambda a: a["orden"]) if not a["entregado"]]
 
+    def ejecuciones_recientes(self, limite):
+        self._vivo()
+        return [{"inicio": "2026-11-17T12:30:00+00:00", "fin": "2026-11-17T12:33:00+00:00", "resultado": e["resultado"],
+                 "expedientes": e["expedientes"], "novedades": e["novedades"], "codigo": e["codigo"]}
+                for e in reversed(self.ejecuciones)][:limite]
+
+    def guardar_expedientes(self, filas):
+        self._vivo()
+        datos = self.__dict__.setdefault("expedientes_cifrados", {})
+        for ref, version, nonce, cifrado, sumar, nuevo in filas:
+            previo = datos.get(ref, {"no_vistas": 0, "nuevo": False, "ultima": None})
+            datos[ref] = {"version": version, "nonce": nonce, "cifrado": cifrado, "no_vistas": previo["no_vistas"] + sumar,
+                          "nuevo": previo["nuevo"] or nuevo, "ultima": "t" if (sumar or nuevo) else previo["ultima"]}
+
+    def expedientes(self):
+        self._vivo()
+        return [(r, d["version"], d["nonce"], d["cifrado"], d["no_vistas"], d["nuevo"], d["ultima"])
+                for r, d in self.__dict__.get("expedientes_cifrados", {}).items()]
+
+    def marcar_vistos(self, caso_ref=None):
+        self._vivo()
+        total = 0
+        for r, d in self.__dict__.get("expedientes_cifrados", {}).items():
+            if caso_ref in (None, r) and (d["no_vistas"] or d["nuevo"]):
+                d["no_vistas"], d["nuevo"], total = 0, False, total + 1
+        return total
+
     def registrar_dispositivo(self, token):
         self._vivo()
         self.__dict__.setdefault("tokens_dispositivo", []).append(token) if token not in self.__dict__.get("tokens_dispositivo", []) else None

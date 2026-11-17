@@ -8,7 +8,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from starlette.concurrency import run_in_threadpool
@@ -47,6 +47,41 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
             return await run_in_threadpool(servicio.estado)
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
+
+    @app.get("/real/monitor/ejecuciones", dependencies=protegidas_app)
+    async def ejecuciones(limite: Annotated[int, Query(ge=1, le=100)] = 30):
+        try:
+            return {"ejecuciones": await run_in_threadpool(servicio.ejecuciones, limite)}
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+
+    @app.get("/real/expedientes", dependencies=protegidas_app)
+    async def expedientes():
+        try:
+            return {"expedientes": await run_in_threadpool(servicio.expedientes)}
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+
+    class Vistos(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")] | None = None
+
+    @app.post("/real/expedientes/vistos", dependencies=protegidas_app)
+    async def marcar_vistos(datos: Vistos):
+        try:
+            return {"actualizados": await run_in_threadpool(servicio.marcar_vistos, datos.id)}
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+
+    @app.post("/real/dispositivos/prueba", dependencies=protegidas_app)
+    async def prueba_push():
+        try:
+            r = await run_in_threadpool(servicio.enviar_prueba)
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+        if r is None:
+            raise HTTPException(412, "Las notificaciones no están configuradas en el servidor")
+        return {"enviados": r[0], "invalidos": r[1]}
 
     @app.delete("/real/credenciales", dependencies=protegidas_app)
     async def olvidar_credenciales():

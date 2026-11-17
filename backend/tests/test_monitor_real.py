@@ -479,3 +479,21 @@ def test_un_anexo_sin_enlace_rechazado_se_diagnostica_solo_con_conteos_estructur
     assert len(conteos) == 1 and all(type(v) is int for v in conteos[0].values()) and "anexo_ausente_celdas_th" in conteos[0]
     todo = " ".join(mensajes)
     assert not any(s in todo for s in ("ANEXO_PRIVADO", "202", m.sim.usuario, m.sim.clave))
+
+
+def test_el_historial_de_ejecuciones_exige_el_token_de_la_app_y_solo_trae_estados_y_conteos():
+    m = Mundo(casos_base())
+    m.guardar_credenciales()
+    assert m.ejecutar().status_code == 200 and m.ejecutar().status_code == 200
+    cab = CAB
+    assert m.c.get("/real/monitor/ejecuciones").status_code == 401
+    assert m.c.get("/real/monitor/ejecuciones", headers={"Authorization": f"Bearer {TOKEN_MONITOR}"}).status_code == 401  # tokens separados
+    r = m.c.get("/real/monitor/ejecuciones?limite=1", headers=cab)
+    assert r.status_code == 200 and len(r.json()["ejecuciones"]) == 1
+    fila = m.c.get("/real/monitor/ejecuciones", headers=cab).json()["ejecuciones"][0]
+    assert set(fila) == {"inicio", "fin", "resultado", "expedientes", "novedades", "codigo"}
+    assert fila["resultado"] in ("ok", "linea_base")
+    assert m.c.get("/real/monitor/ejecuciones?limite=0", headers=cab).status_code == 422
+    assert m.c.get("/real/monitor/ejecuciones?limite=101", headers=cab).status_code == 422
+    m.almacen.caido = True
+    assert m.c.get("/real/monitor/ejecuciones", headers=cab).status_code == 503

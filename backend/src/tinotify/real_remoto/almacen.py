@@ -155,3 +155,41 @@ class AlmacenPg:
     def borrar_dispositivo(self, token):
         with self._tx() as con:
             return con.execute("DELETE FROM tinotify_real.dispositivos WHERE token = %s", (token,)).rowcount > 0
+
+    def ejecuciones_recientes(self, limite):
+        """Últimas ejecuciones, de la más reciente a la más antigua: solo estados de catálogo y conteos."""
+        with self._tx() as con:
+            filas = con.execute(
+                "SELECT inicio, fin, resultado, expedientes, novedades, codigo FROM tinotify_real.ejecuciones "
+                "ORDER BY inicio DESC LIMIT %s", (max(1, min(int(limite), 100)),)).fetchall()
+        return [{"inicio": f[0].isoformat(), "fin": f[1].isoformat() if f[1] else None, "resultado": f[2],
+                 "expedientes": f[3], "novedades": f[4], "codigo": f[5]} for f in filas]
+
+    # --- listado de expedientes (cifrado) ------------------------------------------------------------------------------
+    def guardar_expedientes(self, filas):
+        """filas: (caso_ref, version_llave, nonce, cifrado, sumar_novedades, es_nuevo)."""
+        with self._tx() as con:
+            for ref, version, nonce, cifrado, sumar, nuevo in filas:
+                con.execute(
+                    "INSERT INTO tinotify_real.expedientes (caso_ref, version_llave, nonce, cifrado, novedades_no_vistas, nuevo, ultima_novedad) "
+                    "VALUES (%(r)s, %(v)s, %(n)s, %(c)s, %(s)s, %(u)s, CASE WHEN %(s)s > 0 OR %(u)s THEN clock_timestamp() END) "
+                    "ON CONFLICT (caso_ref) DO UPDATE SET version_llave = EXCLUDED.version_llave, nonce = EXCLUDED.nonce, "
+                    "cifrado = EXCLUDED.cifrado, actualizado_en = clock_timestamp(), "
+                    "novedades_no_vistas = least(tinotify_real.expedientes.novedades_no_vistas + %(s)s, 100000), "
+                    "ultima_novedad = CASE WHEN %(s)s > 0 OR %(u)s THEN clock_timestamp() ELSE tinotify_real.expedientes.ultima_novedad END, "
+                    "nuevo = tinotify_real.expedientes.nuevo OR %(u)s",
+                    {"r": ref, "v": version, "n": nonce, "c": cifrado, "s": sumar, "u": nuevo})
+
+    def expedientes(self):
+        with self._tx() as con:
+            filas = con.execute("SELECT caso_ref, version_llave, nonce, cifrado, novedades_no_vistas, nuevo, ultima_novedad "
+                                "FROM tinotify_real.expedientes").fetchall()
+        return [(f[0], f[1], bytes(f[2]), bytes(f[3]), f[4], f[5], f[6].isoformat() if f[6] else None) for f in filas]
+
+    def marcar_vistos(self, caso_ref=None):
+        with self._tx() as con:
+            if caso_ref is None:
+                return con.execute("UPDATE tinotify_real.expedientes SET novedades_no_vistas = 0, nuevo = false "
+                                   "WHERE novedades_no_vistas > 0 OR nuevo").rowcount
+            return con.execute("UPDATE tinotify_real.expedientes SET novedades_no_vistas = 0, nuevo = false WHERE caso_ref = %s",
+                               (caso_ref,)).rowcount

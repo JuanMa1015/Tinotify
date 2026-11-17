@@ -88,9 +88,9 @@ def test_token_uri_ajeno_se_rechaza(cuenta, tmp_path):
 
 
 class FcmFalso:
-    def __init__(self, respuesta=fcm.OK): self.respuesta, self.enviados = respuesta, []
+    def __init__(self, respuesta=fcm.OK): self.respuesta, self.enviados, self.datos = respuesta, [], []
     def enviar(self, token, titulo, cuerpo, datos=None):
-        self.enviados.append((token, titulo, cuerpo))
+        self.enviados.append((token, titulo, cuerpo)); self.datos.append(datos)
         return self.respuesta
 
 
@@ -101,16 +101,16 @@ def servicio(fcm_falso):
 
 
 def plan(**kw):
-    return SimpleNamespace(**{"novedades": 0, "expedientes_nuevos": 0, **kw})
+    return SimpleNamespace(**{"novedades": 0, "expedientes_nuevos": 0, "expedientes_con_novedades": 0, "anomalias": 0, **kw})
 
 
 def test_el_push_es_generico_y_va_a_todos_los_dispositivos():
     f = FcmFalso()
     s = servicio(f)
     s.registrar_dispositivo("a" * 30); s.registrar_dispositivo("b" * 30); s.registrar_dispositivo("a" * 30)  # repetido: una sola vez
-    s._notificar_push(plan(novedades=2))
+    s._notificar_push(plan(novedades=2, expedientes_con_novedades=1))
     assert [e[0] for e in f.enviados] == ["a" * 30, "b" * 30]
-    assert f.enviados[0][1:] == ("Tinotify", "Hay actuaciones nuevas en SIGAC")
+    assert f.enviados[0][1:] == ("Tinotify", "2 actuaciones nuevas en 1 expediente")
     f.enviados.clear()
     s._notificar_push(plan(expedientes_nuevos=1))
     assert "expediente nuevo" in f.enviados[0][2]
@@ -119,11 +119,11 @@ def test_el_push_es_generico_y_va_a_todos_los_dispositivos():
 def test_un_token_invalido_se_borra_y_un_error_transitorio_no():
     s = servicio(FcmFalso(fcm.TOKEN_INVALIDO))
     s.registrar_dispositivo("a" * 30)
-    s._notificar_push(plan(novedades=1))
+    s._notificar_push(plan(novedades=1, expedientes_con_novedades=1))
     assert s._almacen.dispositivos() == []
     s = servicio(FcmFalso(fcm.ERROR))
     s.registrar_dispositivo("a" * 30)
-    s._notificar_push(plan(novedades=1))
+    s._notificar_push(plan(novedades=1, expedientes_con_novedades=1))
     assert s._almacen.dispositivos() == ["a" * 30]
 
 
