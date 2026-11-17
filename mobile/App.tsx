@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import Acceso from './src/Acceso';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
 import { biometriaActiva, borrarToken, desbloquear, fijarBiometria, guardarToken, leerToken } from './src/almacen';
+import { pestanaDeNotificacion, type Pestana } from './src/notificaciones';
 import { colores } from './src/tema';
 
 type Fase = 'cargando' | 'bloqueada' | 'acceso' | 'principal';
@@ -14,6 +16,7 @@ export default function App() {
   const [fase, setFase] = useState<Fase>('cargando');
   const [token, setToken] = useState<string>();
   const [biometria, setBiometria] = useState(false);
+  const [destino, setDestino] = useState<Pestana | null>(null);
   const version = Constants.expoConfig?.version ?? '0.1.0';
 
   const intentarDesbloqueo = useCallback(async () => { if (await desbloquear()) setFase('principal'); }, []);
@@ -28,6 +31,13 @@ export default function App() {
       if (bio) { setFase('bloqueada'); await intentarDesbloqueo(); } else setFase('principal');
     })();
   }, [intentarDesbloqueo]);
+
+  useEffect(() => {  // tocar una notificación abre la pestaña indicada (también con la app cerrada)
+    const abrir = (r: Notifications.NotificationResponse | null) => { const p = pestanaDeNotificacion(r); if (p) setDestino(p); };
+    abrir(Notifications.getLastNotificationResponse());
+    const escucha = Notifications.addNotificationResponseReceivedListener(abrir);
+    return () => escucha.remove();
+  }, []);
 
   async function alConectar(nuevo: string) { await guardarToken(nuevo); setToken(nuevo); setFase('principal'); }
   const salir = useCallback(async () => { await borrarToken(); await fijarBiometria(false); setToken(undefined); setBiometria(false); setFase('acceso'); }, []);
@@ -45,6 +55,6 @@ export default function App() {
       <Boton texto="Desbloquear" icono="finger-print" onPress={() => { void intentarDesbloqueo(); }} />
     </View>}
     {fase === 'acceso' && <Acceso onListo={alConectar} />}
-    {fase === 'principal' && token && <Principal token={token} biometria={biometria} version={version} onBiometria={cambiarBiometria} onSalir={salir} />}
+    {fase === 'principal' && token && <Principal token={token} biometria={biometria} version={version} onBiometria={cambiarBiometria} onSalir={salir} destino={destino} onDestinoAtendido={() => setDestino(null)} />}
   </View>;
 }

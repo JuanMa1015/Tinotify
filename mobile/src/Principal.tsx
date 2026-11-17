@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Linking, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Acceso from './Acceso';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, obtenerEjecuciones, obtenerEstado, olvidarCredenciales } from './api';
+import { ErrorApi, enviarPrueba, marcarVistos, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, olvidarCredenciales, type Expediente } from './api';
 import { biometriaDisponible } from './almacen';
-import { activarPush, desactivarPush, pushActivo } from './notificaciones';
+import { activarPush, desactivarPush, pushActivo, type Pestana } from './notificaciones';
 import {
   duracionTexto, fechaHoraBogota, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
@@ -14,6 +14,7 @@ import { colores, espacio } from './tema';
 type Props = {
   token: string; biometria: boolean; version: string;
   onBiometria: (activa: boolean) => Promise<void>; onSalir: () => Promise<void>;
+  destino?: Pestana | null; onDestinoAtendido?: () => void;
 };
 
 const saludo = () => {
@@ -22,17 +23,21 @@ const saludo = () => {
 };
 const mensajeDe = (err: unknown, otro = 'No se completó la operación.') => (err instanceof ErrorApi ? err.message : otro);
 
-export default function Principal({ token, biometria, version, onBiometria, onSalir }: Props) {
+export default function Principal({ token, biometria, version, onBiometria, onSalir, destino, onDestinoAtendido }: Props) {
   const [pestana, setPestana] = useState('inicio');
   const [estado, setEstado] = useState<EstadoMonitor>();
   const [ejecuciones, setEjecuciones] = useState<Ejecucion[]>();
+  const [expedientes, setExpedientes] = useState<Expediente[] | null>();  // null: el servidor aún no ofrece el listado
   const [error, setError] = useState('');
   const [refrescando, setRefrescando] = useState(false);
   const [reconectando, setReconectando] = useState(false);
 
+  useEffect(() => { if (destino) { setPestana(destino); onDestinoAtendido?.(); void cargar(); } }, [destino]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   const cargar = useCallback(async () => {
     setRefrescando(true);
     try {
+      obtenerExpedientes(token).then(r => setExpedientes(r.expedientes), () => setExpedientes(prev => prev ?? null));
       const [e, x] = await Promise.all([obtenerEstado(token), obtenerEjecuciones(token).catch(() => ({ ejecuciones: [] as Ejecucion[] }))]);  // el historial es secundario: si falla, el resto sigue
       setEstado(e); setEjecuciones(x.ejecuciones); setError('');
     } catch (err) {
@@ -52,7 +57,7 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
       {pestana === 'inicio' && <Inicio estado={estado} />}
-      {pestana === 'casos' && <Casos estado={estado} />}
+      {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
       {pestana === 'ajustes' && <Ajustes biometria={biometria} version={version} onBiometria={onBiometria} onSalir={onSalir} token={token}
         onError={setError} onReconectar={() => setReconectando(true)} />}
@@ -97,13 +102,52 @@ function Cifra({ icono, valor, texto }: { icono: Icono; valor?: number; texto: s
   </View>;
 }
 
-function Casos({ estado }: { estado?: EstadoMonitor }) {
+function Casos({ estado, expedientes, token, onCambio, onError }: { estado?: EstadoMonitor; expedientes?: Expediente[] | null; token: string; onCambio: (e: Expediente[]) => void; onError: (m: string) => void }) {
+  const [filtro, setFiltro] = useState<'todos' | 'novedades' | 'nuevos'>('todos');
+  const [busqueda, setBusqueda] = useState('');
+  const lista = expedientes ?? [];
+  const q = busqueda.trim().toLowerCase();
+  const visibles = lista.filter(x => (filtro === 'todos' || (filtro === 'novedades' ? x.novedades_no_vistas > 0 : x.nuevo))
+    && (q === '' || String(x.numero).includes(q) || x.cliente.toLowerCase().includes(q)));
+  const sinVer = lista.filter(x => x.novedades_no_vistas > 0 || x.nuevo).length;
+
+  async function ver(x: Expediente) {
+    if (!x.novedades_no_vistas && !x.nuevo) return;
+    onCambio(lista.map(y => (y.id === x.id ? { ...y, novedades_no_vistas: 0, nuevo: false } : y)));  // se ve al instante
+    try { await marcarVistos(token, x.id); } catch (err) { onError(mensajeDe(err)); }
+  }
+  async function verTodos() {
+    onCambio(lista.map(y => ({ ...y, novedades_no_vistas: 0, nuevo: false })));
+    try { await marcarVistos(token); } catch (err) { onError(mensajeDe(err)); }
+  }
+
   return <>
     <Titulo texto="Expedientes" subtitulo={estado ? `${estado.expedientes_en_estado} en seguimiento` : undefined} />
-    {!estado ? <TarjetaEsqueleto lineas={3} /> : <Tarjeta>
-      <Text style={s.cuerpo}>Tinotify vigila todos los expedientes de tu cuenta de SIGAC en cada revisión y te avisa de las actuaciones nuevas y de los expedientes que aparezcan.</Text>
-      <Text style={[s.cuerpo, { marginTop: 8 }]}>Por privacidad, el servidor no conserva radicados ni el contenido de las actuaciones. El listado con el detalle de cada expediente llegará en una próxima versión.</Text>
-    </Tarjeta>}
+    {expedientes === undefined ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /></> :
+      expedientes === null ? <Tarjeta><Text style={s.cuerpo}>El listado de expedientes aún no está disponible en el servidor. Tinotify sigue vigilando tu cuenta y te avisará de las novedades.</Text></Tarjeta> : <>
+      <TextInput accessibilityLabel="Buscar por radicado o nombre" placeholder="Buscar por radicado o nombre" placeholderTextColor={colores.textoSuave}
+        value={busqueda} onChangeText={setBusqueda} autoCorrect={false} style={s.buscar} />
+      <View style={s.chips}>
+        {([['todos', 'Todos'], ['novedades', 'Con novedades'], ['nuevos', 'Nuevos']] as const).map(([id, texto]) =>
+          <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: filtro === id }} onPress={() => setFiltro(id)}
+            style={[s.chip, filtro === id && s.chipOn]}><Text style={[s.chipTxt, filtro === id && { color: colores.blanco }]}>{texto}</Text></Pressable>)}
+      </View>
+      {sinVer > 0 && <Text style={s.enlace} accessibilityRole="button" onPress={() => { void verTodos(); }}>Marcar todo como visto ({sinVer})</Text>}
+      {visibles.length === 0 ? <Tarjeta><Text style={s.cuerpo}>{lista.length === 0 ? 'Aún no hay expedientes guardados. Aparecerán tras la próxima revisión.' : 'Ningún expediente coincide con el filtro.'}</Text></Tarjeta> :
+        visibles.map(x => <Pressable key={x.id} accessibilityRole="button" onPress={() => { void ver(x); }}>
+          <Tarjeta>
+            <View style={s.fila}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.fuerte}>Radicado {x.numero}</Text>
+                <Text style={s.cuerpo}>{x.cliente}</Text>
+                <Text style={s.pequeno}>{x.estado}{x.ultima_novedad ? ` · última novedad ${fechaHoraBogota(x.ultima_novedad)}` : ''}</Text>
+              </View>
+              {x.novedades_no_vistas > 0 ? <Etiqueta texto={`${x.novedades_no_vistas} ${x.novedades_no_vistas === 1 ? 'nueva' : 'nuevas'}`} tono="azul" /> :
+                x.nuevo ? <Etiqueta texto="Nuevo" tono="lima" /> : null}
+            </View>
+          </Tarjeta>
+        </Pressable>)}
+    </>}
   </>;
 }
 
@@ -146,6 +190,14 @@ function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onR
     } catch (err) { onError(mensajeDe(err, 'No se pudieron cambiar las notificaciones.')); }
   }
 
+  async function probarPush() {
+    try {
+      const r = await enviarPrueba(token);
+      onError(r.enviados > 0 ? '' : 'No hay ningún teléfono registrado. Activa las notificaciones e inténtalo de nuevo.');
+      if (r.enviados > 0) Alert.alert('Notificación enviada', 'Debería llegar en unos segundos. Tócala para comprobar que abre la aplicación.');
+    } catch (err) { onError(mensajeDe(err, 'No se pudo enviar la notificación de prueba.')); }
+  }
+
   function confirmarOlvidar() {
     Alert.alert('Olvidar mis credenciales', 'Se borran del servidor tu usuario y clave de SIGAC y tu estado de seguimiento. Tinotify dejará de revisar tu cuenta hasta que la conectes de nuevo.', [
       { text: 'Cancelar', style: 'cancel' },
@@ -165,6 +217,9 @@ function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onR
     <Tarjeta>
       <Fila titulo="Notificaciones en este teléfono" detalle="Un aviso cuando haya actuaciones nuevas o aparezca un expediente nuevo." valor={push} onCambio={cambiarPush} />
     </Tarjeta>
+
+    <Boton texto="Enviar notificación de prueba" secundario icono="paper-plane-outline" onPress={() => { void probarPush(); }} />
+    <Texto>Comprueba que este teléfono recibe los avisos. No modifica tus expedientes.</Texto>
 
     <Seccion texto="Seguridad" />
     <Tarjeta>
@@ -213,5 +268,7 @@ const s = StyleSheet.create({
   cuerpo: { fontSize: 15, color: colores.textoSuave, lineHeight: 22 }, fuerte: { fontSize: 17, fontWeight: '700', color: colores.texto, marginBottom: 2 },
   pequeno: { fontSize: 13, color: colores.textoSuave, marginTop: 4 }, enlace: { fontSize: 15, color: colores.marinoSuave, fontWeight: '600', marginTop: 10, textDecorationLine: 'underline' },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  buscar: { borderWidth: 1, borderColor: colores.borde, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 12, fontSize: 16, color: colores.texto, backgroundColor: colores.superficie, marginBottom: 12 },
+  chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: colores.azulChip }, chipOn: { backgroundColor: colores.marino }, chipTxt: { fontSize: 14, fontWeight: '600', color: colores.marino },
   seccion: { fontSize: 14, fontWeight: '700', color: colores.textoSuave, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 20, marginBottom: 8 },
 });

@@ -47,3 +47,8 @@ export const registrarDispositivo = (token: string, fcm: string) => solicitar<{ 
 export const quitarDispositivo = (token: string, fcm: string) => solicitar<{ borrado: boolean }>('/real/dispositivos', token, { metodo: 'DELETE', cuerpo: { token: fcm } });
 
 export const obtenerEjecuciones = (token: string) => solicitar<{ ejecuciones: Ejecucion[] }>('/real/monitor/ejecuciones?limite=30', token, { limiteMs: 90000 });
+
+export type Expediente = { id: string; numero: number; cliente: string; estado: string; novedades_no_vistas: number; nuevo: boolean; ultima_novedad: string | null };
+export const obtenerExpedientes = (token: string) => solicitar<{ expedientes: Expediente[] }>('/real/expedientes', token, { limiteMs: 90000 });
+export const marcarVistos = (token: string, id?: string) => solicitar<{ actualizados: number }>('/real/expedientes/vistos', token, { cuerpo: id ? { id } : {} });
+export const enviarPrueba = (token: string) => solicitar<{ enviados: number; invalidos: number }>('/real/dispositivos/prueba', token, { cuerpo: {}, limiteMs: 60000 });

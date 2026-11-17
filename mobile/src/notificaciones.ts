@@ -27,3 +27,12 @@ export async function desactivarPush(tokenApp: string): Promise<void> {
 }
 
 export const pushActivo = async (): Promise<boolean> => (await SecureStore.getItemAsync(CLAVE_FCM)) !== null;
+
+export type Pestana = 'inicio' | 'casos' | 'actividad' | 'ajustes';
+const PESTANAS: Pestana[] = ['inicio', 'casos', 'actividad', 'ajustes'];
+
+/** Pestaña que debe abrir la app al tocar una notificación (el servidor la envía en `data.pestana`; nunca datos del caso). */
+export function pestanaDeNotificacion(respuesta: Notifications.NotificationResponse | null): Pestana | null {
+  const dato = respuesta?.notification.request.content.data?.pestana;
+  return typeof dato === 'string' && (PESTANAS as string[]).includes(dato) ? (dato as Pestana) : null;
+}
