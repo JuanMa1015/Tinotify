@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { useEffect, useRef } from 'react';
+import { ActivityIndicator, Animated, Image, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colores, radios, espacio } from './tema';
 
@@ -52,6 +53,32 @@ export function BarraInferior({ activa, onElegir }: { activa: string; onElegir: 
         <Text style={[e.barraTxt, on && { color: colores.lima }]}>{i.texto}</Text>
       </Pressable>;
     })}
+  </View>;
+}
+
+export function Esqueleto({ alto = 20, ancho = '100%', estilo }: { alto?: number; ancho?: number | `${number}%`; estilo?: ViewStyle }) {
+  const opacidad = useRef(new Animated.Value(0.45)).current;
+  useEffect(() => {
+    const anim = Animated.loop(Animated.sequence([
+      Animated.timing(opacidad, { toValue: 1, duration: 700, useNativeDriver: true }),
+      Animated.timing(opacidad, { toValue: 0.45, duration: 700, useNativeDriver: true })]));
+    anim.start();
+    return () => anim.stop();
+  }, [opacidad]);
+  return <Animated.View accessible={false} style={[{ height: alto, width: ancho, borderRadius: radios.chico, backgroundColor: colores.borde, opacity: opacidad }, estilo]} />;
+}
+
+export function TarjetaEsqueleto({ lineas = 2 }: { lineas?: number }) {
+  return <View accessibilityLabel="Cargando" style={e.tarjeta}>
+    {Array.from({ length: lineas }, (_, i) => <Esqueleto key={i} alto={i === 0 ? 22 : 16} ancho={i === 0 ? '55%' : '85%'} estilo={{ marginBottom: 10 }} />)}
+  </View>;
+}
+
+export function PantallaCarga({ texto }: { texto?: string }) {
+  return <View accessibilityLiveRegion="polite" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+    <Image source={require('../assets/logo-completo.png')} accessibilityLabel="Tinotify" resizeMode="contain" style={{ width: 240, height: 160 }} />
+    <ActivityIndicator color={colores.marino} style={{ marginTop: 16 }} />
+    {texto && <Text style={{ color: colores.textoSuave, fontSize: 15, marginTop: 12, textAlign: 'center' }}>{texto}</Text>}
   </View>;
 }
 

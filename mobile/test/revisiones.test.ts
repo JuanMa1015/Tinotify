@@ -37,3 +37,24 @@ test('la URL del servidor exige HTTPS sin credenciales ni parámetros', () => {
   assert.equal(urlValida('http://localhost:8000', true), 'http://localhost:8000');
   assert.throws(() => urlValida('http://localhost:8000', false));
 });
+
+import { duracionTexto, fechaHoraBogota, resumenDeEjecucion } from '../src/revisiones.ts';
+
+test('la fecha se muestra como Hoy, Ayer o día y mes, en hora de Bogotá', () => {
+  const ahora = new Date('2026-11-17T20:00:00Z'); // 15:00 en Bogotá
+  assert.match(fechaHoraBogota('2026-11-17T17:30:00Z', ahora), /^Hoy, 12:30 p\. m\.$/);
+  assert.match(fechaHoraBogota('2026-11-16T12:30:00Z', ahora), /^Ayer, /);
+  assert.match(fechaHoraBogota('2026-11-10T12:30:00Z', ahora), /^10 nov/);
+  assert.equal(fechaHoraBogota('basura', ahora), '--');
+  assert.match(fechaHoraBogota('2026-11-17T04:59:00Z', ahora), /^Ayer, 11:59 p\. m\.$/); // 23:59 del día anterior en Bogotá
+});
+
+test('la duración y el resumen de cada revisión', () => {
+  assert.equal(duracionTexto('2026-11-17T12:30:00Z', '2026-11-17T12:33:05Z'), '3 min 5 s');
+  assert.equal(duracionTexto('2026-11-17T12:30:00Z', '2026-11-17T12:30:20Z'), '20 s');
+  assert.equal(duracionTexto('2026-11-17T12:30:00Z', null), null);
+  const r = resumenDeEjecucion({ inicio: 'x', fin: null, resultado: 'ok', expedientes: 15, novedades: 2, codigo: null });
+  assert.deepEqual([r.titulo, r.detalle, r.ok], ['Todo al día', '15 expedientes revisados · 2 actuaciones nuevas', true]);
+  assert.equal(resumenDeEjecucion({ inicio: 'x', fin: null, resultado: 'error_acceso', expedientes: null, novedades: null, codigo: 'x' }).ok, false);
+  assert.equal(resumenDeEjecucion({ inicio: 'x', fin: null, resultado: 'en_curso', expedientes: null, novedades: null, codigo: null }).titulo, 'Revisión en curso');
+});
