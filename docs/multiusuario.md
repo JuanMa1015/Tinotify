@@ -3,7 +3,8 @@
 Estado: propuesta. Hoy el sistema es de un solo usuario (un token único, una fila de credenciales, una referencia acreditada).
 
 ## Decisiones propuestas
-1. **Registro por invitación.** Solo se crea cuenta con un código de invitación generado por el administrador. Evita guardar credenciales de desconocidos y limita la carga sobre SIGAC. Registro abierto: más adelante, si se decide.
+1. **Registro por invitación (decidido).** Solo se crea cuenta con un código de invitación generado por el administrador. Evita guardar credenciales de desconocidos y limita la carga sobre SIGAC. Registro abierto: se evalúa tras el ensayo.
+1b. **Identificador: solo el correo (decidido).** No se añade nombre de usuario: con pocos invitados no aporta, obliga a validar unicidad y a aceptar dos formas de entrar, y el correo ya hace falta para los avisos. Si más adelante hay muchos usuarios, se reevalúa.
 2. **Identidad de la app separada de SIGAC.** Cuenta Tinotify = correo + contraseña propia. Las credenciales de SIGAC son un dato aparte, guardado cifrado, por usuario.
 3. **Contraseña:** hash con scrypt (biblioteca estándar de Python), sal única y comparación en tiempo constante. Nunca se guarda en claro.
 4. **Sesiones por dispositivo:** token aleatorio de 256 bits; en la base solo su SHA-256. Caduca (30 días, renovable), se puede revocar uno a uno y todos al cambiar la contraseña.
