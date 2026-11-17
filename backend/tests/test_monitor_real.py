@@ -277,7 +277,9 @@ def test_primera_ejecucion_linea_base_luego_novedades_expediente_nuevo_y_confirm
     assert d["aviso_nuevo"] and [a["id"] for a in d["avisos"]] == [d["aviso_nuevo"]]
     aviso = d["avisos"][0]
     assert (aviso["novedades"], aviso["expedientes_con_novedades"], aviso["expedientes_nuevos"]) == (3, 2, 1)
-    texto = json.dumps(d)
+    # Los UUID de los avisos son aleatorios y pueden contener por azar "101", "202" o "404": se excluyen del texto inspeccionado.
+    sin_ids = {**d, "aviso_nuevo": None, "avisos": [{k: v for k, v in a.items() if k != "id"} for a in d["avisos"]]}
+    texto = json.dumps(sin_ids)
     assert not any(s in texto for s in ("POSTERIOR", "NUEVO_EXPEDIENTE", "EXPEDIENTE_A", "101", "202", "404", m.sim.usuario, m.sim.clave))
     # Sin confirmar, el aviso sigue pendiente (se repite en la siguiente revisión, nunca se pierde) y no se duplica la novedad.
     d2 = m.ejecutar().json()
