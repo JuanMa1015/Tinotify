@@ -9,6 +9,14 @@ from tinotify.parsers.diagnostico_historial import CLAVES_CONTEOS, CodigoHistori
 from tinotify.parsers.parser import ErrorParseoHistorial, parse_actuaciones
 
 
+@pytest.fixture(autouse=True)
+def _sin_admision_de_anexos_sin_enlace(monkeypatch):
+    """Estas pruebas miden los indicadores de la RUTA DE RECHAZO; se fuerza esa ruta (la admisión se prueba en
+    test_anexos_sin_enlace.py)."""
+    import tinotify.parsers.parser as modulo
+    monkeypatch.setattr(modulo, '_es_anexo_sin_enlace', lambda *args: False)
+
+
 PRIVADO = 'MARCADOR_PRIVADO_FICTICIO_NO_IMPRIMIR'
 SEPARADOR = '<tr><td colspan="2"><hr></td></tr>'
 CABECERA = '<tr><td>TITULO_FICTICIO</td><td>ASESOR--&gt;ESTUDIANTE</td></tr>'

@@ -348,6 +348,18 @@ def _nodos_no_vacios(celda: Tag) -> int:
     )
 
 
+def _nodos_visibles_celda_archivo(celda: Tag) -> int:
+    """Nodos que sí aportan algo a la celda del archivo: todo salvo espacios, `&nbsp;` y `<br>` sueltos.
+
+    Cualquier otra etiqueta (imagen, script, estilo, span, enlace...), comentario o texto cuenta.
+    """
+    return sum(
+        1 for nodo in celda.children
+        if not (isinstance(nodo, Tag) and nodo.name == "br" and not nodo.attrs and not nodo.contents)
+        and (isinstance(nodo, Tag) or str(nodo).strip(" \t\n\r\f\xa0"))
+    )
+
+
 def _tabla_en_fila_anexos(fila: Tag, tabla: Tag) -> int:
     """1 si la tabla está en la segunda celda de la fila «Anexos» de su propio bloque, 0 si no."""
     if tabla.find_parent("tr") is not fila:  # colgada de otra fila o de una tabla interna
@@ -464,7 +476,7 @@ def _es_anexo_sin_enlace(
         descripcion = clean(celdas[0])
         if not descripcion or _FECHA.fullmatch(descripcion):  # 3
             return False
-        if _nodos_no_vacios(celdas[1]) != 0:  # 4: sin texto, br, nbsp, imagen, script, comentario...
+        if _nodos_visibles_celda_archivo(celdas[1]) != 0:  # 4: solo espacios, nbsp o br; nada más
             return False
         if _celda_autocerrada(html, celdas[1]) != 0:  # 5: sin verificar o `<td/>` => rechazo
             return False
@@ -527,10 +539,7 @@ def _anexos(bloque: list[Tag], conteos: dict | None = None, html: str | None = N
                     _referencia_anexo(enlace["href"]),
                 ))
                 con_enlace += 1
-            if primera_sin_enlace is not None and con_enlace == 0:  # condición 7
-                fila_anexo, celdas = primera_sin_enlace
-                _registrar_indicadores_enlace_ausente(conteos, fila, tabla, fila_anexo, celdas, html)
-                raise ErrorParseoHistorial("Fila de anexo no interpretable.", codigo=CodigoHistorial.ANEXO_ENLACE_AUSENTE)
+            # Condición 7 retirada: SIGAC publica anexos sin archivo descargable aunque ningún otro de la tabla tenga enlace.
     return tuple(anexos)
 
 

@@ -447,3 +447,33 @@ def test_los_expedientes_que_fallan_se_registran_solo_con_codigos_de_catalogo(ca
     detalle = json.loads(lineas[0].split("detalle=", 1)[1])
     assert sum(x["n"] for x in detalle) == 2 and all(set(x) == {"codigo", "etapa", "n"} for x in detalle)
     assert not any(s in " ".join(x.getMessage() for x in caplog.records) for s in ("202", "303", "EXPEDIENTE_", m.sim.usuario, m.sim.clave))
+
+
+def _con_anexo_sin_enlace(sim, anexos, peticion):
+    import httpx
+    r = sim(peticion)
+    if peticion.url.path.endswith("casos.formCaso.con") and b"hidCaso=202" in peticion.content:
+        return httpx.Response(200, headers={"content-type": r.headers["content-type"]}, text=r.text.replace("</table></form>", anexos + "</table></form>", 1))
+    return r
+
+
+def test_un_anexo_sin_enlace_rechazado_se_diagnostica_solo_con_conteos_estructurales(caplog):
+    import httpx
+    from tinotify.integrations.sigac.sigac_client import BASE_URL, SigacClient
+    anexos = ('<tr><td>Anexos :</td><td><table id="tablaAnexos"><tr><td>ANEXO_PRIVADO_SIN_ENLACE</td><td><span></span></td></tr></table></td></tr>')
+
+    def fabrica(sim):
+        return lambda: SigacClient(httpx.Client(base_url=BASE_URL, follow_redirects=False,
+                                               transport=httpx.MockTransport(lambda p: _con_anexo_sin_enlace(sim, anexos, p))))
+    m = Mundo(casos_base(), fabrica=fabrica)
+    m.guardar_credenciales()
+    caplog.set_level(logging.WARNING)
+    d = m.ejecutar().json()
+    mensajes = [x.getMessage() for x in caplog.records]
+    assert d["casos_fallidos"] == 1, mensajes
+    linea = [x for x in mensajes if x.startswith("monitor_diagnostico_anexos")]
+    assert len(linea) == 1, mensajes
+    conteos = json.loads(linea[0].split("conteos=", 1)[1])
+    assert len(conteos) == 1 and all(type(v) is int for v in conteos[0].values()) and "anexo_ausente_celdas_th" in conteos[0]
+    todo = " ".join(mensajes)
+    assert not any(s in todo for s in ("ANEXO_PRIVADO", "202", m.sim.usuario, m.sim.clave))

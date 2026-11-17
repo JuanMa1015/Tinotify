@@ -155,12 +155,18 @@ def test_condicion_3_la_primera_celda_no_puede_tener_forma_de_fecha_de_cabecera(
 
 
 @pytest.mark.parametrize('segunda', [
-    '<br>', '&nbsp;', '<!-- COMENTARIO_FICTICIO -->', '<script>var x = 1;</script>',
+    '<!-- COMENTARIO_FICTICIO -->', '<script>var x = 1;</script>',
     '<style>a { color: red }</style>', '<span></span>', 'TEXTO_FICTICIO', '<img src="x">',
     '<a>sin_href</a>',
-], ids=['br', 'nbsp', 'comentario', 'script', 'style', 'span_vacio', 'texto', 'imagen', 'a_sin_href'])
+], ids=['comentario', 'script', 'style', 'span_vacio', 'texto', 'imagen', 'a_sin_href'])
 def test_condicion_4_la_segunda_celda_no_puede_tener_ningun_nodo(segunda):
     rechazado(historial(CON_ENLACE, f'<tr><td>ANEXO_FICTICIO</td><td>{segunda}</td></tr>'))
+
+
+@pytest.mark.parametrize('segunda', ['', ' ', '&nbsp;', '<br>', '<br/>', ' &nbsp; <br> ', '\n'])
+def test_condicion_4_espacios_nbsp_y_br_cuentan_como_celda_vacia(segunda):
+    r = extraer(historial(CON_ENLACE, f'<tr><td>ANEXO_FICTICIO</td><td>{segunda}</td></tr>'))
+    assert [a.sin_enlace for a in r[0].anexos] == [False, True]
 
 
 def test_condicion_5_celda_autocerrada_o_no_verificable_se_rechaza(monkeypatch):
@@ -179,13 +185,9 @@ def test_condicion_6_ningun_enlace_en_la_fila(fila):
     rechazado(historial(CON_ENLACE, fila))
 
 
-def test_condicion_7_la_tabla_debe_tener_un_anexo_con_enlace():
-    rechazado(historial(SIN_ENLACE))
-    rechazado(historial(SIN_ENLACE, '<tr><td>OTRO_FICTICIO</td><td></td></tr>'))
-    # Un enlace en OTRA tabla del bloque no cuenta para esta tabla.
-    rechazado('<table>' + BLOQUE + anexos(SIN_ENLACE) + anexos(CON_ENLACE) + '</table>')
-    # Una tabla con solo cabecera tampoco aporta enlaces.
-    rechazado('<table>' + BLOQUE + anexos('<tr><th>D</th><th>A</th></tr>', SIN_ENLACE) + '</table>')
+def test_tabla_solo_con_anexos_sin_enlace_se_admite_y_se_conserva():
+    r = extraer(historial(SIN_ENLACE, '<tr><td>OTRO_FICTICIO</td><td>&nbsp;</td></tr>'))
+    assert [a.sin_enlace for a in r[0].anexos] == [True, True]
 
 
 def test_un_fallo_inesperado_al_evaluar_la_fila_nunca_la_admite(monkeypatch):
@@ -208,8 +210,9 @@ def test_las_demas_reglas_de_anexos_no_cambian():
 def test_el_rechazo_conserva_los_indicadores_diagnosticos():
     conteos = {}
     with pytest.raises(ErrorParseoHistorial):
-        parse_actuaciones(historial(SIN_ENLACE), 'CASO_FICTICIO', estadisticas=conteos)
-    assert conteos['anexo_ausente_celda1_con_texto'] == 1 and conteos['anexo_ausente_celda2_hijos'] == 0
+        parse_actuaciones(historial(CON_ENLACE, '<tr><td>ANEXO_FICTICIO</td><td><span></span></td></tr>'),
+                          'CASO_FICTICIO', estadisticas=conteos)
+    assert conteos['anexo_ausente_celda1_con_texto'] == 1 and conteos['anexo_ausente_celda2_hijos'] == 1
     assert conteos['anexo_ausente_tabla_en_fila_anexos'] == 1 and conteos['anexo_ausente_celda2_autocerrada'] == 0
     admitido = {}
     parse_actuaciones(historial(CON_ENLACE, SIN_ENLACE), 'CASO_FICTICIO', estadisticas=admitido)

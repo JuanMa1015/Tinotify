@@ -56,7 +56,7 @@ class ServicioMonitor:
         ejecucion = self._almacen.iniciar_ejecucion()
         cfg = self._config
         try:
-            lecturas, fallidos, listados, errores = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
+            lecturas, fallidos, listados, errores, diagnosticos = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login,
                 clave_acreditacion=self._clave, instancia=INSTANCIA_REAL))
         except SesionOcupada:
@@ -75,6 +75,8 @@ class ServicioMonitor:
             # Para quien opera el servicio: cuántos expedientes fallaron y con qué código/etapa de catálogo.
             registro.warning("monitor_casos_fallidos listados=%s leidos=%s detalle=%s", listados, len(lecturas), json.dumps(
                 sorted([{"codigo": c, "etapa": e, "n": n} for (c, e), n in errores.items()], key=lambda d: (-d["n"], d["codigo"]))))
+        if diagnosticos:
+            registro.warning("monitor_diagnostico_anexos conteos=%s", json.dumps(diagnosticos, sort_keys=True))
         semillas = {caso_ref(self._clave, INSTANCIA_REAL, self._referencia.numero): self._referencia.multiconjunto()}
         try:
             plan, aviso = self._almacen.aplicar(lecturas, semillas)
