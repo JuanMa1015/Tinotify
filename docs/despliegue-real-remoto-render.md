@@ -116,3 +116,13 @@ la sección 2 con tu autorización; el cambio de Render es un paso aparte.
 - Credenciales institucionales en un tercero (TLS terminado en el proxy de Render): decisión tuya.
 - Tres errores de clave bloquean el login 15 minutos.
 - Hasta actualizar Android, la app seguirá apuntando a `127.0.0.1` o al sintético.
+
+## 9. Monitor (opcional, se activa solo con sus variables)
+
+Con las variables del monitor (ver `render.real-remoto.propuesta.yaml`) el servicio añade: guardar las credenciales **cifradas** (AES-256-GCM;
+la llave solo está en Render) al iniciar sesión con `"recordar": true`, y revisar **todos** los expedientes comparando huellas con clave contra
+el estado en Supabase (`tinotify_real`; ver `docs/monitor-real-supabase.md`). Rutas: `POST /real/monitor/ejecutar`, `GET /real/monitor/avisos` y
+`POST /real/monitor/avisos/{id}/entregado` (token del monitor, distinto del de la app); `GET /real/monitor/estado` y `DELETE /real/credenciales` (token
+de la app). Las respuestas llevan solo conteos y los UUID de los avisos. Sin esas variables, el servicio se comporta como antes (sin rutas de monitor).
+Quitar las variables del monitor es el rollback de esta fase. Validado en Linux (Python 3.11.9, dependencias con hashes) y contra PostgreSQL 17 real con el
+login restringido: `bash supabase/checks/validar_almacen_real_python.sh`.

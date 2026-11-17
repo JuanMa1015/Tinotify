@@ -434,7 +434,9 @@ def test_el_codigo_fuente_no_registra_ni_persiste_credenciales():
     import tinotify.real_remoto as paquete
     fuentes = "\n".join(p.read_text(encoding="utf-8") for p in Path(paquete.__file__).parent.glob("*.py"))
     assert "print(" not in fuentes and "open(" not in fuentes and "write_text" not in fuentes
-    assert "psycopg" not in fuentes and "sqlite3" not in fuentes
+    assert "sqlite3" not in fuentes
+    # La base de datos (Supabase) solo se toca desde almacen.py, con carga perezosa de psycopg.
+    assert [x.name for x in Path(paquete.__file__).parent.glob("*.py") if "psycopg" in x.read_text(encoding="utf-8")] == ["almacen.py"]
     import re
     for linea in fuentes.splitlines():
         if re.search(r"registro\.|logging\.|log\.", linea) and re.search(r"usuario|clave|password|token", linea, re.I):
@@ -681,7 +683,8 @@ def test_el_verificador_de_la_rama_detecta_rutas_secretos_y_texto_judicial():
     assert problemas["texto_judicial"] == ["docs/nota.md"] and problemas["demasiado_grande"] == ["docs/grande.md"]
     assert "backend/src/ok.py" not in json.dumps(problemas) and "backend/.env.example" not in json.dumps(problemas)
     assert v.pertenece("backend/src/x.py") and v.pertenece("docs/a.md") and v.pertenece("render.yaml")
-    assert not any(v.pertenece(r) for r in ("mobile/App.tsx", "supabase/config.toml", "package.json", "otra/cosa.py"))
+    assert not any(v.pertenece(r) for r in ("mobile/App.tsx", "supabase/config.toml", "package.json", "otra/cosa.py", "supabase/propuestas/20261115000000_crear_almacen_sintetico.sql"))
+    assert v.pertenece("supabase/propuestas/20261117000000_crear_almacen_real.sql") and v.pertenece("supabase/checks/validar_almacen_real.sh")
 
 
 def test_un_fallo_de_sigac_se_registra_solo_con_codigos_de_catalogo(entorno, caplog):

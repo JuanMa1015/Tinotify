@@ -85,6 +85,11 @@ class ReferenciaPortable:
     def entradas(self):
         return [(None, h) for h in self._huellas]
 
+    def multiconjunto(self):
+        """Huellas con clave y su multiplicidad (semilla del monitor para el expediente acreditado)."""
+        from collections import Counter
+        return Counter(self._huellas)
+
     def huella(self, actuacion):
         return huella_portable(self._clave, actuacion.huella_version)
 

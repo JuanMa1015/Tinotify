@@ -20,7 +20,11 @@ import sys
 
 # Qué entra en la rama: el backend, su documentación, la configuración de ignorados y la definición del servicio.
 # Todo lo demás (mobile/, supabase/, etc.) lo hereda la rama base sin cambios o no se despliega.
-MANIFIESTO = ("backend/", "docs/", ".gitignore", "pytest.ini", "render.yaml", "render.real-remoto.propuesta.yaml")
+MANIFIESTO = ("backend/", "docs/", ".gitignore", "pytest.ini", "render.yaml", "render.real-remoto.propuesta.yaml",
+              # esquema del monitor real (propuesta SQL, su baja y su validacion); el resto de supabase/ lo hereda la rama base
+              "supabase/propuestas/20261117000000_crear_almacen_real.sql", "supabase/propuestas/20261117000000_crear_almacen_real_down.sql",
+              "supabase/checks/almacen_real_pruebas.sql", "supabase/checks/validar_almacen_real.sh",
+              "supabase/checks/validar_almacen_real_python.sh")
 # En la rama, `render.real-remoto.propuesta.yaml` pasa a ser `render.yaml` (documentación de la configuración del servicio).
 RUTAS_PROHIBIDAS = re.compile(
     r"(^|/)(\.local|\.venv|venv|node_modules|\.expo|exportaciones|build|dist|__pycache__|android|ios)/"

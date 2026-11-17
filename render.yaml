@@ -40,4 +40,7 @@ services:
         sync: false                                    # secreto: se escribe en el panel, no aquí
       # Opcionales (por defecto: TIPO=2, sin TOTAL_CASOS, TTL_MIN=20, MAX_LOGINS=3, VENTANA_LOGIN_MIN=15):
       #   TINOTIFY_RR_TIPO, TINOTIFY_RR_TOTAL_CASOS, TINOTIFY_RR_TTL_MIN, TINOTIFY_RR_MAX_LOGINS, TINOTIFY_RR_VENTANA_LOGIN_MIN
+      # Monitor (OPCIONAL; todas juntas o ninguna): TINOTIFY_RR_PG_HOST, TINOTIFY_RR_PG_PORT (5432), TINOTIFY_RR_PG_DBNAME, TINOTIFY_RR_PG_USER
+      #   (tinotify_real_login.<ref>), TINOTIFY_RR_PG_PASSWORD (secreto), TINOTIFY_RR_PG_CA_FILE=/etc/secrets/supabase-ca.crt,
+      #   TINOTIFY_RR_CLAVE_CIFRADO (secreto, 32 bytes en base64), TINOTIFY_RR_MONITOR_TOKEN (secreto, distinto del token de la app).
       # PROHIBIDAS en este servicio (no arranca): TINOTIFY_SR_*, TINOTIFY_REAL_*, SIGAC_*, SUPABASE*, PG*, DATABASE_URL.

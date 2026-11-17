@@ -1,8 +1,8 @@
-"""Gestor de acceso SIGAC remoto: una sola lectura a la vez, presupuesto de intentos y cierre del cliente.
+"""Gestor de acceso SIGAC remoto: un solo acceso a la vez, presupuesto de intentos y cierre del cliente.
 
-Las credenciales solo existen como argumentos de `iniciar` y se pasan al cliente SIGAC: no se asignan a atributos,
-no se registran y no sobreviven a la llamada. Tras la lectura el cliente HTTP se cierra (las cookies SIGAC se
-descartan): no se retiene ninguna sesión SIGAC viva. Solo queda, en `HistorialTemporal`, el contenido con vencimiento.
+Las credenciales solo existen como argumentos y se pasan al cliente SIGAC: no se asignan a atributos, no se registran y no
+sobreviven a la llamada. Tras la lectura el cliente HTTP se cierra (las cookies SIGAC se descartan): no se retiene ninguna sesión
+SIGAC viva. Tanto el login manual como el monitor pasan por `con_cliente`, así comparten el candado y el presupuesto de intentos.
 """
 
 from collections import deque
@@ -41,17 +41,21 @@ class GestorSesion:
                 raise DemasiadosIntentosLogin(max(1, int(self._config.ventana_login_s - (ahora - self._intentos[0]))))
             self._intentos.append(ahora)
 
-    def iniciar(self, usuario, clave, caso_login=None):
+    def con_cliente(self, accion):
+        """Ejecuta `accion(cliente)` con un cliente SIGAC nuevo, en exclusiva y dentro del presupuesto de intentos."""
         if not self._ocupado.acquire(blocking=False):
             raise SesionOcupada()
         try:
             self._presupuesto()
             cliente = self._fabrica()
             with cliente:
-                return leer_con_referencia(
-                    cliente, usuario, clave, tipo=self._config.tipo, total_casos=self._config.total_casos,
-                    caso_numero=self._referencia.numero, politica=self._politica, entradas=self._referencia.entradas(),
-                    huella=self._referencia.huella, caso=self._referencia.caso_id, historial=self._historial,
-                    ttl_s=self._config.ttl_s, caso_login=caso_login)
+                return accion(cliente)
         finally:
             self._ocupado.release()
+
+    def iniciar(self, usuario, clave, caso_login=None):
+        return self.con_cliente(lambda cliente: leer_con_referencia(
+            cliente, usuario, clave, tipo=self._config.tipo, total_casos=self._config.total_casos,
+            caso_numero=self._referencia.numero, politica=self._politica, entradas=self._referencia.entradas(),
+            huella=self._referencia.huella, caso=self._referencia.caso_id, historial=self._historial,
+            ttl_s=self._config.ttl_s, caso_login=caso_login))

@@ -25,7 +25,11 @@ from tinotify.demo.novedades import INSTANCIA_REAL
 from tinotify.integrations.sigac.sigac_client import SigacClient, SigacClientError, SigacSessionExpired
 from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.comun import Acceso, evaluar_transporte, respuesta as _respuesta
+from tinotify.real_remoto.almacen import AlmacenIncompatible, AlmacenNoDisponible, AlmacenPg
+from tinotify.real_remoto.cifrado import CifradoNoValido
 from tinotify.real_remoto.config import Config, ConfiguracionInsegura
+from tinotify.real_remoto.rutas_monitor import registrar_monitor
+from tinotify.real_remoto.servicio_monitor import ServicioMonitor
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, GestorSesion, SesionOcupada
 from tinotify.services import referencia_portable
 from tinotify.services.consulta_real_local import IdentidadExpedienteNoVerificada
@@ -48,6 +52,19 @@ class InicioSesion(BaseModel):
     usuario: SecretStr = Field(min_length=1, max_length=128)
     clave: SecretStr = Field(min_length=1, max_length=256)
     caso_login: SecretStr | None = Field(default=None, max_length=128)
+    recordar: bool = False  # guardar las credenciales CIFRADAS para que el monitor pueda volver a entrar
+
+
+def _http_desde_sigac(error):
+    """HTTPException genérica para un fallo de SIGAC. Diagnóstico para quien opera el servicio: solo valores de catálogos
+    cerrados (código, etapa y, si hubo un fallo de transporte, el NOMBRE de la clase de la excepción). Nunca mensajes, URLs,
+    cabeceras ni credenciales."""
+    causa = getattr(error, "causa", None)
+    registro.warning("sigac_fallo codigo=%s etapa=%s causa=%s", error.codigo.value, error.etapa.value,
+                     json.dumps(causa, sort_keys=True) if isinstance(causa, dict) else causa)
+    if isinstance(error, SigacSessionExpired) or error.codigo in _ACCESO_RECHAZADO:
+        return HTTPException(403, "Acceso no confirmado")
+    return HTTPException(502, "El servicio institucional no respondió como se esperaba")
 
 
 def _preparar(config, politica, referencia):
@@ -66,13 +83,29 @@ def _preparar(config, politica, referencia):
 
 
 def crear_app(config: Config | None = None, *, politica=None, referencia=None, historial=None,
-              fabrica_cliente=SigacClient, reloj=time.monotonic):
+              fabrica_cliente=SigacClient, reloj=time.monotonic, almacen=None, clave_acreditacion=None):
     config = config or Config.desde_entorno()  # el proceso no arranca con una configuración insegura
     politica, referencia = _preparar(config, politica, referencia)
     historial = historial or HistorialTemporal(reloj=reloj, temporizador=True)
     gestor = GestorSesion(config=config, politica=politica, referencia=referencia, historial=historial,
                           fabrica_cliente=fabrica_cliente, reloj=reloj)
     acceso = Acceso(config.token, reloj=reloj)
+    servicio_monitor = None
+    if config.monitor is not None:
+        if clave_acreditacion is None:
+            try:
+                clave_acreditacion = cargar_clave_acreditacion(config.acreditacion)
+            except IdentidadExpedienteNoVerificada:
+                raise ConfiguracionInsegura("acreditacion_o_referencia_invalida") from None
+        almacen = almacen or AlmacenPg(config.monitor.pg)
+        try:
+            almacen.verificar()
+        except AlmacenNoDisponible:
+            registro.warning("almacen_no_disponible_al_arrancar")  # el servicio arranca; las rutas del monitor darán 503 hasta que responda
+        except AlmacenIncompatible:
+            raise ConfiguracionInsegura("almacen_incompatible") from None
+        servicio_monitor = ServicioMonitor(config=config, almacen=almacen, sesiones=gestor, referencia=referencia,
+                                           clave_acreditacion=clave_acreditacion)
     for biblioteca in ("httpx", "httpcore"):
         logging.getLogger(biblioteca).setLevel(logging.CRITICAL)  # sus mensajes incluyen URLs institucionales
 
@@ -100,8 +133,11 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
             if "origin" in request.headers:  # solo clientes nativos: ningún navegador (CSRF/drive-by)
                 return _respuesta(403, "Origen no permitido")
             if request.method == "POST":
+                declarada = request.headers.get("content-length")
+                if declarada is None and request.url.path != "/real/sesion":
+                    declarada = "0"  # los POST sin cuerpo (p. ej. del monitor) pueden omitir la cabecera
                 try:
-                    longitud = int(request.headers.get("content-length", ""))
+                    longitud = int(declarada if declarada is not None else "")
                 except ValueError:
                     return _respuesta(411, "Se requiere la longitud del cuerpo")
                 if not 0 <= longitud <= MAX_CUERPO_LOGIN:
@@ -145,10 +181,23 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
 
     @app.post("/real/sesion", dependencies=protegidas)
     async def iniciar_sesion(datos: InicioSesion):
+        if datos.recordar and servicio_monitor is None:
+            raise HTTPException(422, "Guardar credenciales no está disponible")
+        usuario, clave = datos.usuario.get_secret_value(), datos.clave.get_secret_value()
+        caso_login = datos.caso_login.get_secret_value() if datos.caso_login else None
+
+        def iniciar_y_guardar():
+            resumen = gestor.iniciar(usuario, clave, caso_login)
+            guardadas = False
+            if datos.recordar:
+                try:
+                    servicio_monitor.guardar_credenciales(usuario, clave, caso_login)
+                    guardadas = True
+                except (AlmacenNoDisponible, AlmacenIncompatible, CifradoNoValido):
+                    registro.warning("credenciales_no_guardadas")  # el acceso ya funcionó: se informa, no se pierde la sesión
+            return resumen, guardadas
         try:
-            resumen = await run_in_threadpool(
-                gestor.iniciar, datos.usuario.get_secret_value(), datos.clave.get_secret_value(),
-                datos.caso_login.get_secret_value() if datos.caso_login else None)
+            resumen, guardadas = await run_in_threadpool(iniciar_y_guardar)
         except SesionOcupada:
             raise HTTPException(409, "Ya hay un acceso en curso") from None
         except DemasiadosIntentosLogin as error:
@@ -158,16 +207,12 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         except IdentidadExpedienteNoVerificada:
             raise HTTPException(503, "Servicio no configurado") from None
         except SigacClientError as error:
-            # Diagnóstico para quien opera el servicio: solo valores de catálogos cerrados (código, etapa y, si hubo un fallo
-            # de transporte, el NOMBRE de la clase de la excepción). Nunca mensajes, URLs, cabeceras ni credenciales.
-            causa = getattr(error, "causa", None)
-            registro.warning("sigac_fallo codigo=%s etapa=%s causa=%s", error.codigo.value, error.etapa.value,
-                             json.dumps(causa, sort_keys=True) if isinstance(causa, dict) else causa)
-            if isinstance(error, SigacSessionExpired) or error.codigo in _ACCESO_RECHAZADO:
-                raise HTTPException(403, "Acceso no confirmado") from None
-            raise HTTPException(502, "El servicio institucional no respondió como se esperaba") from None
-        return {"estado": "activa", "expira_en_s": resumen["expira_en_s"], "actuaciones": resumen["actuaciones"],
-                "en_referencia": resumen["en_referencia"], "adicionales": resumen["adicionales_a_la_referencia"]}
+            raise _http_desde_sigac(error) from None
+        respuesta = {"estado": "activa", "expira_en_s": resumen["expira_en_s"], "actuaciones": resumen["actuaciones"],
+                     "en_referencia": resumen["en_referencia"], "adicionales": resumen["adicionales_a_la_referencia"]}
+        if datos.recordar:
+            respuesta["credenciales_guardadas"] = guardadas
+        return respuesta
 
     @app.get("/real/sesion/estado", dependencies=protegidas)
     async def estado():
@@ -202,4 +247,7 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
             raise HTTPException(404, "Sin historial temporal activo para este expediente")
         return datos
 
+    if servicio_monitor is not None:
+        registrar_monitor(app, servicio=servicio_monitor, config=config, protegidas_app=protegidas,
+                          http_desde_sigac=_http_desde_sigac, reloj=reloj)
     return app
