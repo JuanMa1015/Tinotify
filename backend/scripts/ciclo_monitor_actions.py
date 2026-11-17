@@ -32,6 +32,14 @@ def _esperar_servicio(c, esperar_s=180):
     return False
 
 
+def _informar(c, cabeceras, aviso, estado):
+    """Dice al servidor cómo salió el correo de este aviso (la app lo muestra). Nunca interrumpe el ciclo."""
+    try:
+        c.post(f"/real/monitor/avisos/{aviso['id']}/canal", headers=cabeceras, json={"canal": "correo", "estado": estado}, timeout=30)
+    except httpx.HTTPError:
+        pass
+
+
 def construir_correo(aviso, origen, destino):
     partes = []
     if aviso.get("novedades"):
@@ -82,6 +90,8 @@ def main(entorno=None, enviar=enviar_correo, cliente=None):
             print("ok: sin_avisos")
             return 0
         if env.get("TINOTIFY_CORREO_ACTIVO") != "1":
+            for aviso in avisos:
+                _informar(c, cabeceras, aviso, "desactivado")
             print("ok: avisos_pendientes_correo_desactivado")
             return 0
         destino, usuario, clave = (env.get(k, "").strip() for k in
@@ -93,8 +103,10 @@ def main(entorno=None, enviar=enviar_correo, cliente=None):
             try:
                 enviar(construir_correo(aviso, usuario, destino), usuario, clave)
             except (OSError, smtplib.SMTPException):
+                _informar(c, cabeceras, aviso, "fallido")
                 print("fallo: envio_de_correo")
                 return 4  # sin confirmar: el aviso sigue pendiente y se reintenta en la próxima ejecución
+            _informar(c, cabeceras, aviso, "enviado")
             e = c.post(f"/real/monitor/avisos/{aviso['id']}/entregado", headers=cabeceras, timeout=60)
             if e.status_code not in (200, 404):
                 print(f"fallo: confirmacion_http_{e.status_code}")

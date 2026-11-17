@@ -35,6 +35,12 @@ adm < "$RAIZ/supabase/propuestas/20261118010000_crear_expedientes_real_down.sql"
 echo "BAJA_EXPEDIENTES_OK"
 adm < "$RAIZ/supabase/propuestas/20261118010000_crear_expedientes_real.sql" || { echo "SEGUNDA_ALTA_EXPEDIENTES_FALLO"; exit 1; }
 echo "SEGUNDA_ALTA_EXPEDIENTES_OK"
+adm < "$RAIZ/supabase/propuestas/20261118020000_estado_canales_avisos.sql" || { echo "ALTA_CANALES_FALLO"; exit 1; }
+echo "ALTA_CANALES_OK"
+adm < "$RAIZ/supabase/propuestas/20261118020000_estado_canales_avisos_down.sql" || { echo "BAJA_CANALES_FALLO"; exit 1; }
+echo "BAJA_CANALES_OK"
+adm < "$RAIZ/supabase/propuestas/20261118020000_estado_canales_avisos.sql" || { echo "SEGUNDA_ALTA_CANALES_FALLO"; exit 1; }
+echo "SEGUNDA_ALTA_CANALES_OK"
 adm -c "CREATE ROLE tinotify_real_login LOGIN INHERIT PASSWORD '$CLAVE_LOGIN'; GRANT tinotify_real_app TO tinotify_real_login;" || exit 1
 # Administrador de pruebas con contrasena (solo en este contenedor desechable): limpia las tablas entre pruebas (el login de la aplicacion no tiene TRUNCATE).
 CLAVE_ADMIN="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"
@@ -42,7 +48,7 @@ sa -c "ALTER ROLE supa_admin SUPERUSER PASSWORD '$CLAVE_ADMIN';" || exit 1
 echo "== Dependencias con hashes (Linux, Python 3.11.9) + pruebas del monitor y del almacen contra PostgreSQL real"
 docker run --rm --network "$RED" -v "$RAIZ:/repo:ro" -e PYTHONDONTWRITEBYTECODE=1 \
     -e TINOTIFY_TEST_PG_HOST="$PG" -e TINOTIFY_TEST_PG_USER=tinotify_real_login -e TINOTIFY_TEST_PG_PASSWORD="$CLAVE_LOGIN" \
-    -e PRUEBAS="${PRUEBAS:-backend/tests/test_almacen_cuentas_pg.py backend/tests/test_almacen_expedientes_pg.py backend/tests/test_servicio_cuentas.py backend/tests/test_cuentas.py backend/tests/test_almacen_real_contrato.py}" -e TINOTIFY_TEST_PG_ADMIN_USER=supa_admin -e TINOTIFY_TEST_PG_ADMIN_PASSWORD="$CLAVE_ADMIN" -e PIP_DISABLE_PIP_VERSION_CHECK=1 "$IMG_PY" bash -c '
+    -e PRUEBAS="${PRUEBAS:-backend/tests/test_almacen_cuentas_pg.py backend/tests/test_almacen_expedientes_pg.py backend/tests/test_almacen_canales_pg.py backend/tests/test_servicio_cuentas.py backend/tests/test_cuentas.py backend/tests/test_almacen_real_contrato.py}" -e TINOTIFY_TEST_PG_ADMIN_USER=supa_admin -e TINOTIFY_TEST_PG_ADMIN_PASSWORD="$CLAVE_ADMIN" -e PIP_DISABLE_PIP_VERSION_CHECK=1 "$IMG_PY" bash -c '
       set -e
       python -V
       pip install -q --require-hashes --only-binary=:all: -r /repo/backend/requirements-dev.txt -r /repo/backend/requirements-build.txt 2>&1 | tail -2

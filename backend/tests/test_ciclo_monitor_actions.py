@@ -28,7 +28,7 @@ def servicio(avisos, ejecutar=200, entregado=200):
             return httpx.Response(ejecutar, json={})
         if p.url.path == "/real/monitor/avisos":
             return httpx.Response(200, json={"avisos": avisos})
-        return httpx.Response(entregado, json={})
+        return httpx.Response(200 if p.url.path.endswith('/canal') else entregado, json={})
     return httpx.Client(base_url="https://x.example", transport=httpx.MockTransport(h)), llamadas
 
 
@@ -72,3 +72,18 @@ def test_revision_fallida_no_sigue():
     c, llamadas = servicio([AVISO], ejecutar=502)
     assert ciclo.main(ENV, enviar=lambda *a: None, cliente=c) == 3
     assert not any(p.endswith("/avisos") for _, p in llamadas)
+
+
+def test_informa_al_servidor_como_salio_el_correo():
+    c, llamadas = servicio([AVISO])
+    assert ciclo.main(ENV, enviar=lambda m, u, k: None, cliente=c) == 0
+    assert ("POST", f"/real/monitor/avisos/{AVISO['id']}/canal") in llamadas
+    c, llamadas = servicio([AVISO])
+
+    def falla(*a):
+        raise smtplib.SMTPException
+    assert ciclo.main(ENV, enviar=falla, cliente=c) == 4
+    assert ("POST", f"/real/monitor/avisos/{AVISO['id']}/canal") in llamadas
+    c, llamadas = servicio([AVISO])
+    assert ciclo.main({**ENV, "TINOTIFY_CORREO_ACTIVO": "0"}, cliente=c) == 0
+    assert ("POST", f"/real/monitor/avisos/{AVISO['id']}/canal") in llamadas
