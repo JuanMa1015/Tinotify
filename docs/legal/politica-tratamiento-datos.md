@@ -12,7 +12,8 @@ Un servicio que, con tu autorización, entra a tu cuenta de SIGAC tres veces al 
 | Dato | Para qué | Cómo se protege |
 |---|---|---|
 | Usuario y contraseña de SIGAC | Iniciar sesión en tu nombre para revisar tu cuenta | Cifrados (AES-256-GCM) en el servidor. La llave solo existe en la configuración del servicio de aplicación, no en la base de datos. Nunca se guardan en tu teléfono. |
-| Huellas de tus actuaciones | Detectar qué es nuevo comparando con la revisión anterior | Resúmenes con clave (HMAC): no permiten reconstruir el texto. **No guardamos el contenido de tus expedientes** ni los números de caso en claro. |
+| Huellas de tus actuaciones | Detectar qué es nuevo comparando con la revisión anterior | Resúmenes con clave (HMAC): no permiten reconstruir el texto. **No guardamos el contenido de tus actuaciones.** |
+| Listado de tus expedientes (radicado, nombre del cliente y estado, tal como los muestra SIGAC) | Mostrarte la lista de expedientes al instante y señalar cuáles tienen novedades | Cifrados (AES-256-GCM) con la misma llave del servicio, ligados a cada expediente: la base de datos solo contiene texto cifrado. Se descifran en el servidor únicamente para enviártelos a ti. Contienen datos personales de terceros (nombres de clientes): tú eres responsable de tener autorización para tratarlos. |
 | Conteos y resultados de revisión | Mostrar el estado y decidir si avisar | Solo cifras y estados (por ejemplo "ok" o "error de acceso"). |
 | Código de acceso al servidor | Autenticar tu app ante el servidor | Almacén seguro del teléfono; con huella o rostro si lo activas. |
 | Destino de avisos (correo o dispositivo) | Enviarte los avisos | Solo para avisos. Los avisos no incluyen datos del caso. |
