@@ -44,3 +44,36 @@ export function horaBogota(iso: string): string {
   if (Number.isNaN(d.getTime())) return '--:--';
   return new Intl.DateTimeFormat('es-CO', { hour: 'numeric', minute: '2-digit', hour12: false, timeZone: 'America/Bogota' }).format(d);
 }
+
+export type Ejecucion = { inicio: string; fin: string | null; resultado: string; expedientes: number | null; novedades: number | null; codigo: string | null };
+
+const ZONA = 'America/Bogota';
+const partes = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+
+/** "Hoy, 1:33 a. m." · "Ayer, 12:30 p. m." · "15 nov, 7:30 a. m." (hora de Bogotá). */
+export function fechaHoraBogota(iso: string, ahora: Date = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '--';
+  const hora = new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, hour: 'numeric', minute: '2-digit', hour12: true }).format(d)
+    .replace(/[  ]/g, ' ').toLowerCase();
+  const dia = partes(d), hoy = partes(ahora), ayer = partes(new Date(ahora.getTime() - 86400000));
+  const etiqueta = dia === hoy ? 'Hoy' : dia === ayer ? 'Ayer'
+    : new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, day: 'numeric', month: 'short' }).format(d).replace('.', '').replace(' de ', ' ');
+  return `${etiqueta}, ${hora}`;
+}
+
+export function duracionTexto(inicio: string, fin: string | null): string | null {
+  if (!fin) return null;
+  const s = Math.round((new Date(fin).getTime() - new Date(inicio).getTime()) / 1000);
+  if (!Number.isFinite(s) || s < 0) return null;
+  return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+}
+
+export function resumenDeEjecucion(e: Ejecucion): { titulo: string; detalle: string; ok: boolean } {
+  const base = resumenDeEstado({ credenciales_guardadas: true, expedientes_en_estado: 0, avisos_pendientes: 0, ultima_ejecucion: { resultado: e.resultado, inicio: e.inicio, fin: e.fin } });
+  const partesDetalle: string[] = [];
+  if (e.expedientes !== null) partesDetalle.push(`${e.expedientes} ${e.expedientes === 1 ? 'expediente revisado' : 'expedientes revisados'}`);
+  if (e.novedades) partesDetalle.push(`${e.novedades} ${e.novedades === 1 ? 'actuación nueva' : 'actuaciones nuevas'}`);
+  if (e.resultado === 'en_curso') return { titulo: 'Revisión en curso', detalle: 'Aún no ha terminado.', ok: true };
+  return { titulo: base.titulo, detalle: partesDetalle.join(' · ') || base.detalle, ok: !base.requiereAtencion };
+}

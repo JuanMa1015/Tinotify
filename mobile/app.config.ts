@@ -18,7 +18,7 @@ const config: ExpoConfig = {
     adaptiveIcon: { foregroundImage: './assets/icon-foreground.png', backgroundColor: '#0C1D40' },
   },
   plugins: [
-    ['expo-splash-screen', { image: './assets/splash-icon.png', imageWidth: 240, backgroundColor: '#D9E4F4' }],
+    ['expo-splash-screen', { image: './assets/splash-icon.png', imageWidth: 200, backgroundColor: '#D9E4F4' }],
     ['expo-notifications', { color: '#14213D' }],
     'expo-secure-store',
     ['expo-local-authentication', { faceIDPermission: 'Tinotify usa tu huella o rostro para abrir la app.' }],

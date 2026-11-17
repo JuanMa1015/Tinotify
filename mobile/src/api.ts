@@ -1,5 +1,5 @@
 import { baseURL } from './config';
-import type { EstadoMonitor } from './revisiones';
+import type { Ejecucion, EstadoMonitor } from './revisiones';
 
 export class ErrorApi extends Error {
   constructor(mensaje: string, readonly estado: number | null) { super(mensaje); }
@@ -45,3 +45,5 @@ export const olvidarCredenciales = (token: string) => solicitar<{ credenciales_g
 
 export const registrarDispositivo = (token: string, fcm: string) => solicitar<{ registrado: boolean }>('/real/dispositivos', token, { cuerpo: { token: fcm } });
 export const quitarDispositivo = (token: string, fcm: string) => solicitar<{ borrado: boolean }>('/real/dispositivos', token, { metodo: 'DELETE', cuerpo: { token: fcm } });
+
+export const obtenerEjecuciones = (token: string) => solicitar<{ ejecuciones: Ejecucion[] }>('/real/monitor/ejecuciones?limite=30', token, { limiteMs: 90000 });

@@ -7,7 +7,7 @@ import { colores, espacio, radios } from './tema';
 
 // Usuario y clave de SIGAC solo existen en el estado de esta pantalla mientras se escriben: se envían una vez al servidor
 // (cifrado en reposo allí) y se borran siempre, con éxito o con fallo.
-export default function Acceso({ onListo }: { onListo: (token: string) => Promise<void> }) {
+export default function Acceso({ onListo, tokenFijo, onCancelar }: { onListo: (token: string) => Promise<void>; tokenFijo?: string; onCancelar?: () => void }) {
   const [codigo, setCodigo] = useState('');
   const [usuario, setUsuario] = useState('');
   const [clave, setClave] = useState('');
@@ -15,11 +15,11 @@ export default function Acceso({ onListo }: { onListo: (token: string) => Promis
   const [autorizo, setAutorizo] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
-  const completo = codigo.trim() !== '' && usuario.trim() !== '' && clave !== '' && autorizo;
+  const completo = (tokenFijo !== undefined || codigo.trim() !== '') && usuario.trim() !== '' && clave !== '' && autorizo;
 
   async function enviar() {
     setCargando(true); setError('');
-    const token = codigo.trim();
+    const token = tokenFijo ?? codigo.trim();
     try {
       await conectar(token, usuario.trim(), clave);
       await onListo(token);
@@ -31,12 +31,12 @@ export default function Acceso({ onListo }: { onListo: (token: string) => Promis
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <ScrollView contentContainerStyle={s.pagina} keyboardShouldPersistTaps="handled">
       <View style={s.marca}>
-        <Image source={require('../assets/splash-icon.png')} accessibilityLabel="Tinotify" resizeMode="contain" style={s.logo} />
+        <Image source={require('../assets/logo-completo.png')} accessibilityLabel="Tinotify" resizeMode="contain" style={s.logo} />
         <Text style={s.lema}>Te avisamos cuando haya novedades en SIGAC</Text>
       </View>
       <Tarjeta>
-        <Text style={s.seccion}>Conecta tu cuenta</Text>
-        <Campo icono="key-outline" etiqueta="Código de acceso del servidor" valor={codigo} onCambio={setCodigo} secreto />
+        <Text style={s.seccion}>{tokenFijo ? 'Actualiza tu clave de SIGAC' : 'Conecta tu cuenta'}</Text>
+        {!tokenFijo && <Campo icono="key-outline" etiqueta="Código de acceso del servidor" valor={codigo} onCambio={setCodigo} secreto />}
         <Campo icono="person-outline" etiqueta="Usuario SIGAC" valor={usuario} onCambio={setUsuario} />
         <Campo icono="lock-closed-outline" etiqueta="Contraseña" valor={clave} onCambio={setClave} secreto={!ver}
           derecha={<Pressable accessibilityRole="button" accessibilityLabel={ver ? 'Ocultar contraseña' : 'Mostrar contraseña'} onPress={() => setVer(!ver)} hitSlop={12}>
@@ -46,9 +46,11 @@ export default function Acceso({ onListo }: { onListo: (token: string) => Promis
           <Text style={s.autorizo}>Autorizo a Tinotify a guardar mis datos de acceso cifrados en el servidor y a consultar SIGAC por mí 3 veces al día.</Text>
         </View>
         {error !== '' && <Aviso texto={error} />}
-        <Boton texto="Conectar" icono="paw" onPress={() => { void enviar(); }} cargando={cargando} desactivado={!completo} />
+        <Boton texto={tokenFijo ? 'Guardar' : 'Conectar'} icono="paw" onPress={() => { void enviar(); }} cargando={cargando} desactivado={!completo} />
+        {onCancelar && <View style={{ height: 8 }} />}
+        {onCancelar && <Boton texto="Cancelar" secundario onPress={onCancelar} desactivado={cargando} />}
       </Tarjeta>
-      <Text style={s.nota}>La primera lectura puede tardar hasta 2 minutos. Tu clave se guarda cifrada en el servidor y nunca queda en el teléfono.</Text>
+      <Text style={s.nota}>La primera lectura puede tardar hasta 2 minutos mientras el servidor revisa tus expedientes. Tu clave se guarda cifrada en el servidor y nunca queda en el teléfono.</Text>
       <Image source={require('../assets/gato-asomado.png')} accessible={false} resizeMode="contain" style={s.asomado} />
     </ScrollView>
   </KeyboardAvoidingView>;

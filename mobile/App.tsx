@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import Acceso from './src/Acceso';
 import Principal from './src/Principal';
-import { Boton } from './src/componentes';
+import { Boton, PantallaCarga } from './src/componentes';
 import { biometriaActiva, borrarToken, desbloquear, fijarBiometria, guardarToken, leerToken } from './src/almacen';
 import { colores } from './src/tema';
 
@@ -38,7 +38,7 @@ export default function App() {
 
   return <View style={{ flex: 1, backgroundColor: colores.fondo }}>
     <StatusBar style="dark" />
-    {fase === 'cargando' && <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator size="large" color={colores.marino} /></View>}
+    {fase === 'cargando' && <PantallaCarga />}
     {fase === 'bloqueada' && <View style={{ flex: 1, justifyContent: 'center', padding: 32, gap: 16 }}>
       <Text style={{ fontSize: 30, fontWeight: '700', color: colores.texto, textAlign: 'center' }}>Tinotify</Text>
       <Text style={{ fontSize: 16, color: colores.textoSuave, textAlign: 'center' }}>Confirma tu identidad para continuar.</Text>
