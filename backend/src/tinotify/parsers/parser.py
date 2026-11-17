@@ -116,6 +116,63 @@ def _parece_historial(bloque: list[Tag]) -> bool:
     )
 
 
+def _tiene_senales_historicas(filas: list[Tag]) -> bool:
+    """Impide descartar una tabla ambigua como si fuera solo un formulario.
+
+    Examina filas propias, sin valores/textos de controles ni tablas internas
+    en la celda de etiqueta. Una fecha visible o contenido estático de una
+    categoría conocida exige validación histórica; no demuestra una actuación.
+    La copia solo decide la exclusión: nunca modifica contenido ni huellas.
+    """
+    for fila in filas:
+        copia = deepcopy(fila)
+        for control in copia.find_all(["input", "textarea", "select", "button"]):
+            control.decompose()
+        celdas = _celdas(copia)
+        if not celdas or celdas[0].find("table"):
+            continue
+        etiqueta = clean(celdas[0])
+        if re.match(r"^\d{4}-\d{2}-\d{2}", etiqueta):
+            return True
+        if (len(celdas) == 2 and _normalizar_etiqueta(etiqueta) in _CATEGORIAS_CONOCIDAS
+                and clean(celdas[1])):
+            return True
+    return False
+
+
+def _validar_tabla_omitida(tabla: Tag, conteos: dict) -> None:
+    """No absorber historia reconocible como anexo o texto de una actuación.
+
+    Solo decide RECHAZO: una coincidencia no acredita una nueva ocurrencia.
+    Fechas citadas en valores, títulos o texto no bastan. Se conserva la
+    gramática de cabecera de dos celdas y las categorías estáticas conocidas;
+    con separadores propios también se detectan bloques históricos malformados.
+    Los valores de controles nunca se usan como señales de historia.
+    """
+    senales = False
+    for fila in _filas_propias(tabla):
+        copia = deepcopy(fila)
+        for control in copia.find_all(["input", "textarea", "select", "button"]):
+            control.decompose()
+        celdas = _celdas(copia)
+        if len(celdas) != 2 or celdas[0].find("table"):
+            continue
+        etiqueta = clean(celdas[0])
+        if (_FECHA.fullmatch(etiqueta)
+                or (_normalizar_etiqueta(etiqueta) in _CATEGORIAS_CONOCIDAS and clean(celdas[1]))):
+            senales = True
+            break
+    if not senales:
+        _, bloques = _bloques(tabla)
+        senales = any(_tiene_senales_historicas(bloque) for bloque in bloques)
+    if senales:
+        conteos["tablas_no_interpretadas"] += 1
+        raise ErrorParseoHistorial(
+            "Tabla excluida o anidada con señales históricas; ámbito ambiguo.",
+            codigo=CodigoHistorial.AMBITO_NO_VERIFICADO,
+        )
+
+
 def _texto_contenido(celda: Tag) -> str:
     # Excluir anexos sin modificar el DOM original ni mezclar filas anidadas.
     copia = deepcopy(celda)
@@ -291,6 +348,18 @@ def _nodos_no_vacios(celda: Tag) -> int:
     )
 
 
+def _nodos_visibles_celda_archivo(celda: Tag) -> int:
+    """Nodos que sí aportan algo a la celda del archivo: todo salvo espacios, `&nbsp;` y `<br>` sueltos.
+
+    Cualquier otra etiqueta (imagen, script, estilo, span, enlace...), comentario o texto cuenta.
+    """
+    return sum(
+        1 for nodo in celda.children
+        if not (isinstance(nodo, Tag) and nodo.name == "br" and not nodo.attrs and not nodo.contents)
+        and (isinstance(nodo, Tag) or str(nodo).strip(" \t\n\r\f\xa0"))
+    )
+
+
 def _tabla_en_fila_anexos(fila: Tag, tabla: Tag) -> int:
     """1 si la tabla está en la segunda celda de la fila «Anexos» de su propio bloque, 0 si no."""
     if tabla.find_parent("tr") is not fila:  # colgada de otra fila o de una tabla interna
@@ -407,7 +476,7 @@ def _es_anexo_sin_enlace(
         descripcion = clean(celdas[0])
         if not descripcion or _FECHA.fullmatch(descripcion):  # 3
             return False
-        if _nodos_no_vacios(celdas[1]) != 0:  # 4: sin texto, br, nbsp, imagen, script, comentario...
+        if _nodos_visibles_celda_archivo(celdas[1]) != 0:  # 4: solo espacios, nbsp o br; nada más
             return False
         if _celda_autocerrada(html, celdas[1]) != 0:  # 5: sin verificar o `<td/>` => rechazo
             return False
@@ -470,10 +539,7 @@ def _anexos(bloque: list[Tag], conteos: dict | None = None, html: str | None = N
                     _referencia_anexo(enlace["href"]),
                 ))
                 con_enlace += 1
-            if primera_sin_enlace is not None and con_enlace == 0:  # condición 7
-                fila_anexo, celdas = primera_sin_enlace
-                _registrar_indicadores_enlace_ausente(conteos, fila, tabla, fila_anexo, celdas, html)
-                raise ErrorParseoHistorial("Fila de anexo no interpretable.", codigo=CodigoHistorial.ANEXO_ENLACE_AUSENTE)
+            # Condición 7 retirada: SIGAC publica anexos sin archivo descargable aunque ningún otro de la tabla tenga enlace.
     return tuple(anexos)
 
 
@@ -802,11 +868,15 @@ def _parse_actuaciones(
         raise ErrorParseoHistorial("Contenedor histórico sin tablas.", codigo=CodigoHistorial.CONTENEDOR_SIN_TABLAS)
     resultado = []
     contenedores = set()
+    anexos_validados = set()
     no_interpretadas = []
     for tabla in tablas:
         if tabla.get("id") == "tablaAnexos" or tabla.find_parent("table", id="tablaAnexos"):
+            if id(tabla) not in anexos_validados:
+                _validar_tabla_omitida(tabla, conteos)
             continue
         if any(id(ancestro) in contenedores for ancestro in tabla.find_parents("table")):
+            _validar_tabla_omitida(tabla, conteos)
             conteos["tablas_internas_omitidas"] += 1
             continue
         if _es_envoltura(tabla):
@@ -821,8 +891,9 @@ def _parse_actuaciones(
         if contenedor_id is None and es_formulario and controles_propios and (
             (bloques and all(_tiene_controles(bloque) for bloque in bloques))
             or (not bloques and _tiene_controles(prefijo))
-        ):
-            # Señal DOM de formulario de entrada, no prueba de historial.
+        ) and not _tiene_senales_historicas(_filas_propias(tabla)):
+            # Solo excluir formularios sin señales históricas visibles. Una
+            # mezcla ambigua pasa a las validaciones, nunca se descarta aquí.
             conteos["tablas_formulario_excluidas"] += 1
             continue
         if not bloques:
@@ -845,7 +916,18 @@ def _parse_actuaciones(
                     bloques = restantes
                     conteos["regiones_interactivas_excluidas"] += 1
                     conteos["filas_interactivas_excluidas"] += 1
-        if prefijo and not _tiene_controles(prefijo) and _parece_historial(prefijo):
+        # Conservar el diagnóstico previo de cabeceras discordantes cuando
+        # una cabecera completa del prefijo ya permite detectar la omisión.
+        # Si está malformada, esa guarda no basta: rechazar por las señales
+        # estáticas del prefijo incluso cuando también contiene controles.
+        cabecera_en_prefijo = any(
+            len(celdas := _celdas(fila)) == 2 and _FECHA.fullmatch(clean(celdas[0]))
+            for fila in prefijo
+        )
+        if prefijo and (
+            (not _tiene_controles(prefijo) and _parece_historial(prefijo))
+            or (_tiene_senales_historicas(prefijo) and not cabecera_en_prefijo)
+        ):
             raise ErrorParseoHistorial("Historial anterior al primer separador.", codigo=CodigoHistorial.ANTES_DEL_SEPARADOR)
         contenedores.add(id(tabla))
         extraidas_antes = len(resultado)
@@ -856,6 +938,13 @@ def _parse_actuaciones(
                 continue
             try:
                 resultado.append(_parsear_bloque(bloque, caso_id, conteos, html))
+                # Acreditación por parseo efectivo de metadatos en la fila de
+                # anexos, no por el id CSS. La tabla puede contener una fecha
+                # como descripción legítima sin ser una actuación adicional.
+                for fila in bloque:
+                    celdas = _celdas(fila)
+                    if len(celdas) == 2 and _normalizar_etiqueta(clean(celdas[0])) == "anexos":
+                        anexos_validados.update(id(t) for t in celdas[1].find_all("table", id="tablaAnexos"))
             except ErrorParseoHistorial as error:
                 conteos["bloques_rechazados"] += 1
                 if (

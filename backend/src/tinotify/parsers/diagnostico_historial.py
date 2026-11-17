@@ -5,6 +5,39 @@ from enum import Enum
 
 class CodigoHistorial(str, Enum):
     NO_CLASIFICADO = "fallo_no_clasificado"
+    ERROR_INTERNO = "error_interno"
+    ADVERTENCIA_BIBLIOTECA = "advertencia_biblioteca"
+    LECTURA_ESTABLE = "lectura_estable"
+    LECTURA_CON_CAMBIOS = "lectura_con_cambios"
+    ENTRADA_INVALIDA = "entrada_ensayo_invalida"
+    ACCESO_INCOMPLETO = "entrada_acceso_incompleta"
+    AUTENTICACION_NO_CONFIRMADA = "autenticacion_no_confirmada"
+    TIPO_NO_OFRECIDO = "tipo_acceso_no_ofrecido"
+    REDIRECCION_NO_CONFIRMADA = "redireccion_no_confirmada"
+    LOCATION_AUSENTE = "location_ausente"
+    LOCATION_MULTIPLE = "location_multiple"
+    REDIRECCION_FORMATO = "redireccion_formato_no_admitido"
+    REDIRECCION_ORIGEN = "redireccion_origen_no_admitido"
+    REDIRECCION_ACCESO = "redireccion_a_acceso"
+    REDIRECCION_DESTINO = "redireccion_destino_no_confirmado"
+    HTTP_INESPERADO = "respuesta_http_inesperada"
+    ROL_RESPUESTA_INVALIDA = "rol_respuesta_no_confirmada"
+    ROL_NO_OFRECIDO = "rol_estudiante_no_ofrecido"
+    ROL_ACCION_INVALIDA = "rol_accion_no_confirmada"
+    FORMULARIO_AMBIGUO = "formulario_ausente_o_ambiguo"
+    FORMULARIO_METODO_INVALIDO = "formulario_metodo_o_codificacion_no_confirmados"
+    FORMULARIO_CAMPOS_INVALIDOS = "formulario_campos_no_confirmados"
+    FORMULARIO_CONTROLES_INVALIDOS = "formulario_controles_no_confirmados"
+    FORMULARIO_DUPLICADO = "formulario_campos_duplicados"
+    FORMULARIO_SELECTOR_INVALIDO = "formulario_selector_no_confirmado"
+    FORMULARIO_OPCIONES_INVALIDAS = "formulario_opciones_no_confirmadas"
+    FORMULARIO_SUBMIT_SIN_VALOR = "formulario_submit_sin_valor"
+    LISTADO_NO_CONFIRMADO = "listado_no_confirmado"
+    LISTADO_CAMBIADO = "listado_cambiado_entre_lecturas"
+    EXPEDIENTE_NO_LISTADO = "expediente_no_listado"
+    IDENTIDAD_DETALLE_NO_CONFIRMADA = "consistencia_identidad_detalle_no_confirmada"
+    HISTORIAL_FUERA_DETALLE = "historial_fuera_detalle_o_ambito_ambiguo"
+    BASELINE_INVALIDO = "baseline_con_eventos_inesperados"
     DOCUMENTO_INCOMPLETO = "documento_incompleto"
     PAGINA_NO_PROTEGIDA = "pagina_no_protegida"
     SIN_ACTUACIONES = "sin_actuaciones_reconocidas"
@@ -40,6 +73,48 @@ class CodigoHistorial(str, Enum):
     LIMITE_RESPUESTA = "limite_respuesta_excedido"
     LONGITUD_RESPUESTA = "longitud_respuesta_discordante"
     TRANSPORTE = "fallo_transporte_o_codificacion"
+
+
+class EtapaSigac(str, Enum):
+    NO_DETERMINADA = "no_determinada"
+    PREPARACION = "preparacion"
+    CREDENCIALES = "lectura_credenciales"
+    CREACION_CLIENTE = "creacion_cliente"
+    FORMULARIO = "formulario_acceso"
+    LOGIN = "envio_login"
+    REDIRECCION_LOGIN = "redireccion_login"
+    SESION = "verificacion_sesion"
+    SELECTOR_ROL = "selector_rol"
+    ENVIO_ROL = "envio_rol"
+    REDIRECCION_ROL = "redireccion_rol"
+    PRINCIPAL = "pagina_principal"
+    LISTADO_INICIAL = "listado_inicial"
+    LISTADO_REPETIDO = "listado_repetido"
+    HISTORIAL = "extraccion_historial"
+    HISTORIAL_INICIAL = "historial_inicial"
+    HISTORIAL_REPETIDO = "historial_repetido"
+    BASELINE = "reconciliacion_baseline"
+    RECONCILIACION = "reconciliacion_repetida"
+    COMPARACION = "comparacion"
+    CIERRE = "cierre_cliente"
+    SALIDA = "salida"
+    FINALIZADO = "finalizado"
+
+
+class ContextoDiagnostico:
+    """Único dato: etapa de catálogo cerrado. No guarda inputs, excepciones o DOM."""
+
+    __slots__ = ("_etapa",)
+
+    def __init__(self):
+        self._etapa = EtapaSigac.PREPARACION
+
+    @property
+    def etapa(self):
+        return self._etapa
+
+    def marcar(self, etapa):
+        self._etapa = etapa if isinstance(etapa, EtapaSigac) else EtapaSigac.NO_DETERMINADA
 
 
 CLAVES_CONTEOS_BASE = (
@@ -93,18 +168,25 @@ CLAVES_REGION_INTERACTIVA = (
 # Solo existen cuando una tabla se rechaza por `actuaciones_cabeceras_discordantes`.
 CLAVES_CABECERAS = ("cabeceras_historicas_tabla", "actuaciones_extraidas_tabla")
 
-CLAVES_CONTEOS = CLAVES_CONTEOS_BASE + CLAVES_ANEXO_AUSENTE + CLAVES_REGION_INTERACTIVA + CLAVES_CABECERAS
+CLAVES_CONTEOS = (CLAVES_CONTEOS_BASE + CLAVES_ANEXO_AUSENTE + CLAVES_REGION_INTERACTIVA
+                 + CLAVES_CABECERAS + ("http_estado",))
 
 
 def conteos_seguros(conteos):
     if not isinstance(conteos, dict):
         return {}
-    return {clave: conteos[clave] for clave in CLAVES_CONTEOS
-            if type(conteos.get(clave)) is int and conteos[clave] >= 0}
+    resultado = {clave: conteos[clave] for clave in CLAVES_CONTEOS
+                 if clave != "http_estado" and type(conteos.get(clave)) is int and conteos[clave] >= 0}
+    # Estado HTTP, nunca encabezados ni datos procedentes del cuerpo.
+    if type(conteos.get("http_estado")) is int and 100 <= conteos["http_estado"] <= 599:
+        resultado["http_estado"] = conteos["http_estado"]
+    return resultado
 
 
-def diagnostico_seguro(codigo, conteos=None):
+def diagnostico_seguro(codigo, conteos=None, *, etapa=EtapaSigac.NO_DETERMINADA):
     if not isinstance(codigo, CodigoHistorial):
         codigo = CodigoHistorial.NO_CLASIFICADO
-    return {"diagnostico_version": 1, "categoria": codigo.value,
+    if not isinstance(etapa, EtapaSigac):
+        etapa = EtapaSigac.NO_DETERMINADA
+    return {"diagnostico_version": 2, "etapa": etapa.value, "categoria": codigo.value,
             "estadisticas_estructurales": conteos_seguros(conteos)}

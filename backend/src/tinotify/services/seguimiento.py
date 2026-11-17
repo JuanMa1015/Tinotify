@@ -20,8 +20,33 @@ class ServicioSeguimiento:
         self.politica = politica if politica is not None else PoliticaConfianza()
         self.max_registros = max_registros
 
-    def sincronizar(self, credencial, caso, observaciones, *, clave: UUID, worker: UUID, binding: UUID) -> Recibo:
+    def sincronizar(self, credencial, caso, observaciones, *, clave: UUID, worker: UUID, binding: UUID,
+                    generacion_esperada: int = 0) -> Recibo:
+        """SQLite sintético delega al observador atómico; gen=0 solo es base inicial.
+
+        Reenvíos conservan clave, contenido y generación original. La rama
+        PostgreSQL conserva su contrato existente y no se modifica aquí.
+        """
         caso = _caso(caso)
+        from tinotify.persistence.sqlite_local import AlmacenSqliteLocal, CREDENCIAL_LOCAL, WORKER_LOCAL, BINDING_LOCAL
+        if isinstance(self.almacen, AlmacenSqliteLocal):
+            from tinotify.integrations.sigac.lectura_validada import HistorialSigac, LecturaSigacValidada
+            if isinstance(observaciones, (HistorialSigac, LecturaSigacValidada)):
+                raise PermissionError('Seguimiento generico no admite respuestas SIGAC')
+            if self.almacen.perfil == 'real' or self.instancia == 'sigac-real':
+                raise PermissionError('Seguimiento generico no admite origen SIGAC real')
+            if credencial != CREDENCIAL_LOCAL or worker != WORKER_LOCAL or binding != BINDING_LOCAL:
+                raise PermissionError('Contexto local no autorizado')
+            if self.politica.firma(self.instancia) != self.almacen._politica.firma(self.instancia):
+                raise PermissionError('Politica local incompatible')
+            from tinotify.services.observacion_local import ObservadorLocal
+            observaciones = [adaptar_observacion(a) for a in observaciones]
+            if len(observaciones) > self.max_registros:
+                raise ValueError('Lote demasiado grande; no se ha truncado')
+            recibo, _ = ObservadorLocal(self.almacen, self.instancia).observar(
+                caso, observaciones, clave=clave, generacion_esperada=generacion_esperada,
+                titulo='Expediente local', contenido_vista=lambda _: {})
+            return recibo
         observaciones = [adaptar_observacion(a) for a in observaciones]
         if len(observaciones) > self.max_registros:
             raise ValueError("Lote demasiado grande; no se ha truncado")

@@ -696,6 +696,9 @@ Diseño DOM propuesto:
    archivo/referencia sin GET. Endpoint relativo exacto general.descargarAnexo.con,
    sin host/esquema/fragmento; un solo codigo no vacío, sin query inesperada. Variantes
    no demostradas requieren revisión, no relajación silenciosa.
+   Excepción acotada: una fila descriptiva sin enlace se conserva como `Anexo(sin_enlace=True)`
+   solo si cumple las siete condiciones de `docs/ensayo-sigac.md` (sección «Anexos sin
+   enlace»); cualquier otra fila sin enlace sigue rechazando el historial completo.
 6. DTO con bloques/filas ordenadas/anexos/diagnóstico completo-parcial-no reconocido.
    BeautifulSoup repara HTML pero no prueba recuperación íntegra. Fecha/frontera
    irrecuperable impide confirmar; historial vacío se distingue de fallo de parseo.
