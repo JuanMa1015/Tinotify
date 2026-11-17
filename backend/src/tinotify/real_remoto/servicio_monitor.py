@@ -7,7 +7,8 @@ from tinotify.demo.novedades import INSTANCIA_REAL
 from tinotify.integrations.sigac.sigac_client import SigacClientError, SigacSessionExpired
 from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.almacen import AlmacenNoDisponible
-from tinotify.real_remoto.cifrado import VERSION_LLAVE, cifrar_credenciales, descifrar_credenciales
+from tinotify.real_remoto.cifrado import (
+    CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, descifrar_credenciales, descifrar_expediente)
 from tinotify.real_remoto.monitor import caso_ref, leer_expedientes
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
@@ -37,23 +38,71 @@ class ServicioMonitor:
         return self._almacen.borrar_dispositivo(token)
 
     def _notificar_push(self, plan):
-        """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Mensaje genérico, sin datos del caso."""
+        """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Solo conteos: nunca radicados
+        ni nombres, porque el texto se ve en la pantalla de bloqueo."""
         if self._fcm is None:
             return
-        cuerpo = ("Hay actuaciones nuevas en SIGAC" if plan.novedades else
-                  "Apareció un expediente nuevo en tu cuenta" if plan.expedientes_nuevos else "Hay una lectura por revisar en SIGAC")
+        cuerpo, pestana = _texto_push(plan)
+        self._enviar_a_dispositivos(cuerpo, {"tipo": "novedades", "pestana": pestana})
+
+    def enviar_prueba(self):
+        """Notificación de prueba a los dispositivos registrados. No toca expedientes, avisos ni estado. (enviados, inválidos) o None sin FCM."""
+        if self._fcm is None:
+            return None
+        return self._enviar_a_dispositivos("Notificación de prueba: tu teléfono recibe los avisos de Tinotify.", {"tipo": "prueba", "pestana": "inicio"})
+
+    def _enviar_a_dispositivos(self, cuerpo, datos):
+        enviados = invalidos = 0
         try:
             for token in self._almacen.dispositivos():
-                if self._fcm.enviar(token, "Tinotify", cuerpo) == "token_invalido":
+                resultado = self._fcm.enviar(token, "Tinotify", cuerpo, datos)
+                if resultado == "ok":
+                    enviados += 1
+                elif resultado == "token_invalido":
+                    invalidos += 1
                     self._almacen.borrar_dispositivo(token)
         except AlmacenNoDisponible:
             registro.warning("push_sin_almacen")
+        return enviados, invalidos
+
+    # --- expedientes (listado cifrado) ---------------------------------------------------------------------------------
+    def _guardar_expedientes(self, plan, metadatos):
+        filas = []
+        for cambio in plan.cambios:
+            if cambio.caso_ref not in metadatos:
+                continue
+            numero, cliente, estado = metadatos[cambio.caso_ref]
+            nonce, cifrado = cifrar_expediente(self._llave, cambio.caso_ref, numero, cliente, estado)
+            sumar = cambio.novedades if cambio.accion == "novedades" else 0
+            filas.append((cambio.caso_ref, VERSION_LLAVE, nonce, cifrado, sumar, cambio.accion == "nuevo" and not plan.primera_ejecucion))
+        try:
+            self._almacen.guardar_expedientes(filas)
+        except AlmacenNoDisponible:
+            registro.warning("expedientes_sin_almacen")  # el listado se reintenta en la próxima revisión
+
+    def expedientes(self):
+        salida = []
+        for ref, version, nonce, cifrado, no_vistas, nuevo, ultima in self._almacen.expedientes():
+            try:
+                numero, cliente, estado = descifrar_expediente(self._llave, ref, nonce, cifrado)
+            except CifradoNoValido:
+                continue  # llave distinta o dato alterado: no se muestra
+            salida.append({"id": ref, "numero": numero, "cliente": cliente, "estado": estado,
+                           "novedades_no_vistas": no_vistas, "nuevo": nuevo, "ultima_novedad": ultima})
+        salida.sort(key=lambda e: (-(e["novedades_no_vistas"] > 0), -e["numero"]))
+        return salida
+
+    def marcar_vistos(self, caso_ref=None):
+        return self._almacen.marcar_vistos(caso_ref)
 
     def olvidar_credenciales(self):
         return self._almacen.olvidar_credenciales()
 
     def estado(self):
         return self._almacen.estado()
+
+    def ejecuciones(self, limite=30):
+        return self._almacen.ejecuciones_recientes(limite)
 
     def avisos_pendientes(self):
         return self._almacen.avisos_pendientes()
@@ -75,7 +124,7 @@ class ServicioMonitor:
         ejecucion = self._almacen.iniciar_ejecucion()
         cfg = self._config
         try:
-            lecturas, fallidos, listados, errores, diagnosticos = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
+            lecturas, fallidos, listados, errores, diagnosticos, metadatos = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login,
                 clave_acreditacion=self._clave, instancia=INSTANCIA_REAL))
         except SesionOcupada:
@@ -102,6 +151,7 @@ class ServicioMonitor:
         except AlmacenNoDisponible:
             self._cerrar(ejecucion, "error_estado")
             raise
+        self._guardar_expedientes(plan, metadatos)
         if aviso:
             self._notificar_push(plan)
         self._cerrar(ejecucion, plan.resultado, expedientes=min(plan.expedientes, 1000), novedades=min(plan.novedades, 100000),
@@ -110,3 +160,20 @@ class ServicioMonitor:
                 "expedientes_con_novedades": plan.expedientes_con_novedades, "expedientes_nuevos": plan.expedientes_nuevos,
                 "anomalias": plan.anomalias, "casos_fallidos": fallidos, "linea_base": plan.primera_ejecucion,
                 "aviso_nuevo": aviso, "avisos": self._almacen.avisos_pendientes()}
+
+
+def _plural(n, uno, varios):
+    return f"{n} {uno if n == 1 else varios}"
+
+
+def _texto_push(plan):
+    """Texto genérico con conteos y la pestaña a abrir al tocar la notificación."""
+    if plan.novedades:
+        texto = f"{_plural(plan.novedades, 'actuación nueva', 'actuaciones nuevas')} en {_plural(plan.expedientes_con_novedades, 'expediente', 'expedientes')}"
+        if plan.expedientes_nuevos:
+            texto += f" y {_plural(plan.expedientes_nuevos, 'expediente nuevo', 'expedientes nuevos')}"
+        return texto, "casos"
+    if plan.expedientes_nuevos:
+        return ("Apareció un expediente nuevo en tu cuenta" if plan.expedientes_nuevos == 1
+                else f"Aparecieron {plan.expedientes_nuevos} expedientes nuevos en tu cuenta"), "casos"
+    return "Una lectura necesita tu revisión en SIGAC", "actividad"
