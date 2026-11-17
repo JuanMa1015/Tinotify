@@ -141,3 +141,17 @@ class AlmacenPg:
         return {"credenciales_guardadas": credenciales, "expedientes_en_estado": expedientes, "avisos_pendientes": pendientes,
                 "ultima_ejecucion": None if ultima is None else {
                     "resultado": ultima[0], "inicio": ultima[1].isoformat(), "fin": ultima[2].isoformat() if ultima[2] else None}}
+
+    # --- dispositivos (push) -------------------------------------------------------------------------------------------
+    def registrar_dispositivo(self, token):
+        with self._tx() as con:
+            con.execute("INSERT INTO tinotify_real.dispositivos (token) VALUES (%s) "
+                        "ON CONFLICT (token) DO UPDATE SET ultimo_uso = clock_timestamp()", (token,))
+
+    def dispositivos(self):
+        with self._tx() as con:
+            return [f[0] for f in con.execute("SELECT token FROM tinotify_real.dispositivos ORDER BY creado_en").fetchall()]
+
+    def borrar_dispositivo(self, token):
+        with self._tx() as con:
+            return con.execute("DELETE FROM tinotify_real.dispositivos WHERE token = %s", (token,)).rowcount > 0

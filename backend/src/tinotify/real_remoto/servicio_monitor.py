@@ -21,14 +21,33 @@ class SinCredenciales(Exception):
 
 
 class ServicioMonitor:
-    def __init__(self, *, config, almacen, sesiones, referencia, clave_acreditacion):
-        self._config, self._almacen, self._sesiones = config, almacen, sesiones
+    def __init__(self, *, config, almacen, sesiones, referencia, clave_acreditacion, fcm=None):
+        self._config, self._almacen, self._sesiones, self._fcm = config, almacen, sesiones, fcm
         self._referencia, self._clave = referencia, clave_acreditacion
         self._llave = config.monitor.clave_cifrado
 
     def guardar_credenciales(self, usuario, clave, caso_login=None):
         nonce, cifrado = cifrar_credenciales(self._llave, usuario, clave, caso_login)
         self._almacen.guardar_credenciales(VERSION_LLAVE, nonce, cifrado)
+
+    def registrar_dispositivo(self, token):
+        self._almacen.registrar_dispositivo(token)
+
+    def borrar_dispositivo(self, token):
+        return self._almacen.borrar_dispositivo(token)
+
+    def _notificar_push(self, plan):
+        """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Mensaje genérico, sin datos del caso."""
+        if self._fcm is None:
+            return
+        cuerpo = ("Hay actuaciones nuevas en SIGAC" if plan.novedades else
+                  "Apareció un expediente nuevo en tu cuenta" if plan.expedientes_nuevos else "Hay una lectura por revisar en SIGAC")
+        try:
+            for token in self._almacen.dispositivos():
+                if self._fcm.enviar(token, "Tinotify", cuerpo) == "token_invalido":
+                    self._almacen.borrar_dispositivo(token)
+        except AlmacenNoDisponible:
+            registro.warning("push_sin_almacen")
 
     def olvidar_credenciales(self):
         return self._almacen.olvidar_credenciales()
@@ -83,6 +102,8 @@ class ServicioMonitor:
         except AlmacenNoDisponible:
             self._cerrar(ejecucion, "error_estado")
             raise
+        if aviso:
+            self._notificar_push(plan)
         self._cerrar(ejecucion, plan.resultado, expedientes=min(plan.expedientes, 1000), novedades=min(plan.novedades, 100000),
                      codigo="casos_fallidos" if fallidos else None)
         return {"resultado": plan.resultado, "expedientes": plan.expedientes, "novedades": plan.novedades,

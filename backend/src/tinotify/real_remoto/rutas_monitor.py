@@ -10,6 +10,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from tinotify.integrations.sigac.sigac_client import SigacClientError
@@ -72,6 +73,26 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
             raise http_desde_sigac(error) from None
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
+
+    class Dispositivo(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        token: Annotated[str, StringConstraints(min_length=20, max_length=4096, pattern=r"^\S+$")]
+
+    @app.post("/real/dispositivos", dependencies=protegidas_app)
+    async def registrar_dispositivo(datos: Dispositivo):
+        try:
+            await run_in_threadpool(servicio.registrar_dispositivo, datos.token)
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+        return {"registrado": True}
+
+    @app.delete("/real/dispositivos", dependencies=protegidas_app)
+    async def borrar_dispositivo(datos: Dispositivo):
+        try:
+            borrado = await run_in_threadpool(servicio.borrar_dispositivo, datos.token)
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+        return {"borrado": borrado}
 
     @app.get("/real/monitor/avisos", dependencies=protegidas_monitor)
     async def avisos():

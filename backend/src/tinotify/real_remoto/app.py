@@ -28,6 +28,7 @@ from tinotify.real_remoto.comun import Acceso, evaluar_transporte, respuesta as 
 from tinotify.real_remoto.almacen import AlmacenIncompatible, AlmacenNoDisponible, AlmacenPg
 from tinotify.real_remoto.cifrado import CifradoNoValido
 from tinotify.real_remoto.config import Config, ConfiguracionInsegura
+from tinotify.real_remoto.fcm import ClienteFcm, CuentaServicioNoValida
 from tinotify.real_remoto.rutas_monitor import registrar_monitor
 from tinotify.real_remoto.servicio_monitor import ServicioMonitor
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, GestorSesion, SesionOcupada
@@ -104,8 +105,14 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
             registro.warning("almacen_no_disponible_al_arrancar")  # el servicio arranca; las rutas del monitor darán 503 hasta que responda
         except AlmacenIncompatible:
             raise ConfiguracionInsegura("almacen_incompatible") from None
+        fcm = None
+        if config.fcm_cuenta is not None:
+            try:
+                fcm = ClienteFcm(config.fcm_cuenta)
+            except CuentaServicioNoValida:
+                raise ConfiguracionInsegura("fcm_cuenta_no_valida") from None
         servicio_monitor = ServicioMonitor(config=config, almacen=almacen, sesiones=gestor, referencia=referencia,
-                                           clave_acreditacion=clave_acreditacion)
+                                           clave_acreditacion=clave_acreditacion, fcm=fcm)
     for biblioteca in ("httpx", "httpcore"):
         logging.getLogger(biblioteca).setLevel(logging.CRITICAL)  # sus mensajes incluyen URLs institucionales
 

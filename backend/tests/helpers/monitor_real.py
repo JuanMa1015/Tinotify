@@ -140,6 +140,22 @@ class AlmacenMemoria:
         return [{k: v for k, v in a.items() if k not in ("entregado", "orden")}
                 for a in sorted(self.avisos.values(), key=lambda a: a["orden"]) if not a["entregado"]]
 
+    def registrar_dispositivo(self, token):
+        self._vivo()
+        self.__dict__.setdefault("tokens_dispositivo", []).append(token) if token not in self.__dict__.get("tokens_dispositivo", []) else None
+
+    def dispositivos(self):
+        self._vivo()
+        return list(self.__dict__.get("tokens_dispositivo", []))
+
+    def borrar_dispositivo(self, token):
+        self._vivo()
+        lista = self.__dict__.get("tokens_dispositivo", [])
+        if token in lista:
+            lista.remove(token)
+            return True
+        return False
+
     def marcar_entregado(self, aviso):
         self._vivo()
         a = self.avisos.get(aviso)
