@@ -491,7 +491,7 @@ def test_el_historial_de_ejecuciones_exige_el_token_de_la_app_y_solo_trae_estado
     r = m.c.get("/real/monitor/ejecuciones?limite=1", headers=cab)
     assert r.status_code == 200 and len(r.json()["ejecuciones"]) == 1
     fila = m.c.get("/real/monitor/ejecuciones", headers=cab).json()["ejecuciones"][0]
-    assert set(fila) == {"inicio", "fin", "resultado", "expedientes", "novedades", "codigo"}
+    assert set(fila) == {"inicio", "fin", "resultado", "expedientes", "novedades", "codigo", "aviso"}
     assert fila["resultado"] in ("ok", "linea_base")
     assert m.c.get("/real/monitor/ejecuciones?limite=0", headers=cab).status_code == 422
     assert m.c.get("/real/monitor/ejecuciones?limite=101", headers=cab).status_code == 422

@@ -142,3 +142,16 @@ def leer_expedientes(cliente, usuario, clave, *, tipo, total_casos, caso_login, 
                         if isinstance(segundo.diagnostico, dict):
                             diagnosticos.append(segundo.diagnostico.get("estadisticas_estructurales", {}))
     return lecturas, fallidos, len(casos), errores, diagnosticos, metadatos
+
+
+def leer_un_expediente(cliente, usuario, clave, *, tipo, total_casos, caso_login, numero):
+    """Una autenticación y la lectura validada de UN expediente (bajo demanda). Devuelve sus actuaciones; un historial vacío es válido."""
+    opciones = {"listado_estructural": True} if total_casos is None else {}
+    cliente.autenticar(usuario, clave, tipo=tipo, total_casos_esperado=total_casos, caso_login=caso_login, **opciones)
+    try:
+        _, actuaciones = _resolver_lectura(leer_historial_validado(cliente, numero))
+    except SigacClientError as error:
+        if error.codigo is CodigoHistorial.SIN_ACTUACIONES:
+            return []
+        raise
+    return actuaciones
