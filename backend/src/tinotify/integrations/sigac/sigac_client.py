@@ -11,7 +11,7 @@ from tinotify.integrations.sigac.sigac_identidad import ErrorIdentidadRespuesta,
 from tinotify.integrations.sigac.lectura_validada import HistorialSigac
 from tinotify.integrations.sigac.sigac_respuestas import (
     RespuestaIncompleta, destino_confirmado, destino_login_confirmado, es_acceso, es_selector, leer_acceso,
-    estructura_documento, pagina_protegida, verificar_selector_estudiante,
+    estructura_documento, pagina_principal, pagina_protegida, verificar_selector_estudiante,
 )
 from tinotify.parsers.casos_parser import extraer_casos
 from tinotify.parsers.parser import ErrorParseoHistorial, estadisticas_documento, parse_actuaciones
@@ -275,7 +275,7 @@ class SigacClient:
             self.contexto.marcar(EtapaSigac.PRINCIPAL)
             html_principal = self.obtener_html(destino)
             try:
-                pagina_protegida(html_principal)
+                pagina_principal(html_principal)
             except RespuestaIncompleta as error:
                 error.estructura = estructura_documento(html_principal)  # solo conteos/booleanos, para diagnosticar
                 raise

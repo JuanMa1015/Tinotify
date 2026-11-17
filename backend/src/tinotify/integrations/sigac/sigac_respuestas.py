@@ -177,3 +177,23 @@ def pagina_protegida(html):
     if es_acceso(html) or es_selector(html):
         raise RespuestaIncompleta("La respuesta sigue siendo una página de acceso o selección de rol.",
                                  codigo=CodigoHistorial.PAGINA_NO_PROTEGIDA)
+
+
+
+def pagina_principal(html):
+    """Comprobación de la página principal (menú en `frameset`), independiente de la versión de Python.
+
+    El menú principal es un conjunto de marcos con un respaldo `<noframes><body>`. Los lectores HTML recientes de CPython
+    tratan el contenido de `<noframes>` como texto crudo, así que `soup.body` puede faltar aunque la página sea válida:
+    la comprobación por árbol de `documento_completo` no es fiable aquí. Se exige lo mismo por estructura textual:
+    ni acceso ni selector de rol, `<html>` y su cierre final, y un `<body>` o un `<frameset>` con su cierre.
+    """
+    if not isinstance(html, str) or es_acceso(html) or es_selector(html):
+        raise RespuestaIncompleta("La respuesta sigue siendo una página de acceso o selección de rol.",
+                                 codigo=CodigoHistorial.PAGINA_NO_PROTEGIDA)
+    cuerpo = re.search(r"<body\b", html, re.I) and re.search(r"</body\s*>", html, re.I)
+    marcos = re.search(r"<frameset\b", html, re.I) and re.search(r"</frameset\s*>", html, re.I)
+    if (not re.search(r"<html\b", html, re.I) or not (cuerpo or marcos)
+            or not re.search(r"</html\s*>\s*(?:<!--.*?-->\s*)*$", html, re.I | re.S)):
+        raise RespuestaIncompleta("Documento incompleto o estructura no confirmada.",
+                                 codigo=CodigoHistorial.DOCUMENTO_INCOMPLETO)

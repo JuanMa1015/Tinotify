@@ -742,3 +742,62 @@ def test_la_estructura_diagnostica_cuenta_etiquetas_de_apertura_y_nombra_etiquet
     assert len(estructura_documento("".join(f"<t{i}>" for i in range(60)))["etiquetas"]) == 25
     for ch in open(__import__("tinotify.integrations.sigac.sigac_respuestas", fromlist=["x"]).__file__, encoding="utf-8").read():
         assert ord(ch) >= 32 or ch in "\n\r\t"  # sin caracteres de control en el código fuente
+
+
+PRINCIPAL_MARCOS = ("<html><head><meta charset='utf-8'><title>Menu</title><style>body{}</style></head>"
+                    "<noframes><body><div>Su navegador no admite marcos</div></body></noframes>"
+                    "<frameset rows='10%,*'><frame src='a'><frame src='b'><frame src='c'><frame src='d'><frame src='e'></frameset></html>")
+
+
+@pytest.fixture(params=["lector_clasico", "lector_reciente"])
+def lector_html(request, monkeypatch):
+    """CPython 3.11.9 lee <noframes> como etiquetas; las versiones recientes (p. ej. 3.11.18) como texto crudo."""
+    import html.parser
+    if request.param == "lector_reciente":
+        monkeypatch.setattr(html.parser.HTMLParser, "CDATA_CONTENT_ELEMENTS",
+                            ("script", "style", "xmp", "iframe", "noembed", "noframes", "textarea", "title"))
+    return request.param
+
+
+def test_la_pagina_principal_con_marcos_es_valida_con_cualquier_version_del_lector_html(lector_html):
+    from tinotify.integrations.sigac.sigac_respuestas import RespuestaIncompleta, pagina_principal
+    pagina_principal(PRINCIPAL_MARCOS)                                   # no lanza
+    pagina_principal("<html><body><p>Menu</p></body></html>\n<!-- fin -->")  # la forma sencilla sigue siendo válida
+    from backend.tests.test_integridad_historial_sigac import FORMULARIO, SELECTOR
+    for malo in (FORMULARIO, SELECTOR, "", "   ", None, "<html><body>sin cierre",
+                 "<html><head></head></html>", "<body><p>sin html</p></body></html>",
+                 PRINCIPAL_MARCOS + "PUBLICIDAD", "<html><head></head><frameset><frame></html>"):
+        with pytest.raises(RespuestaIncompleta):
+            pagina_principal(malo)
+
+
+def test_el_login_completo_acepta_el_menu_principal_con_marcos_con_cualquier_lector(lector_html):
+    from backend.tests.test_integridad_historial_sigac import COOKIE, SELECTOR
+
+    def sigac(peticion):
+        ruta = peticion.url.path.removeprefix("/sigac/")
+        cab = {"content-type": "text/html"}
+        if ruta == "index.jsp":
+            return httpx.Response(200, headers=cab, text=FORMULARIO)
+        if ruta == "sesion.validar.ses":
+            return httpx.Response(302, headers={"location": "general.principal.con",
+                                                "set-cookie": f"JSESSIONID={COOKIE}; Path=/sigac/; Secure; HttpOnly"})
+        if ruta == "general.formCambiarTipoUsuario.con":
+            return httpx.Response(200, headers=cab, text=SELECTOR)
+        if ruta == "sesion.cambiar.ses":
+            return httpx.Response(302, headers={"location": "general.principal.con"})
+        if ruta == "general.principal.con":
+            return httpx.Response(200, headers=cab, text=PRINCIPAL_MARCOS)
+        return httpx.Response(200, headers=cab, text=LISTADO)
+    with sigac_con(sigac) as cliente:
+        casos = cliente.autenticar(USUARIO, CLAVE, tipo="2", total_casos_esperado=None, listado_estructural=True)
+    assert [c.numero for c in casos] == [101]
+
+
+def test_el_arranque_registra_la_version_de_python(entorno, caplog):
+    caplog.set_level(logging.WARNING)
+    with con_servidor(entorno, [CONTENIDO]) as (c, _, _, _):
+        with c:  # el ciclo de vida (arranque) solo corre dentro del contexto
+            c.get("/health")
+    import platform
+    assert f"arranque python={platform.python_version()}" in " ".join(x.getMessage() for x in caplog.records)

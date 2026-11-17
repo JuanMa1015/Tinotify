@@ -10,6 +10,7 @@ llegan solo en el cuerpo de `POST /real/sesion` por HTTPS, se usan en memoria y 
 from contextlib import asynccontextmanager
 import json
 import logging
+import platform
 import time
 from typing import Annotated
 from uuid import UUID
@@ -77,6 +78,7 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
 
     @asynccontextmanager
     async def ciclo_de_vida(app):
+        registro.warning("arranque python=%s", platform.python_version())  # versión del intérprete (ayuda a diagnosticar)
         yield
         historial.invalidar()  # al apagar no queda contenido en memoria
 
