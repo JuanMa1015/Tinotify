@@ -58,3 +58,14 @@ test('la duración y el resumen de cada revisión', () => {
   assert.equal(resumenDeEjecucion({ inicio: 'x', fin: null, resultado: 'error_acceso', expedientes: null, novedades: null, codigo: 'x' }).ok, false);
   assert.equal(resumenDeEjecucion({ inicio: 'x', fin: null, resultado: 'en_curso', expedientes: null, novedades: null, codigo: null }).titulo, 'Revisión en curso');
 });
+
+import { canalesDeAviso } from '../src/revisiones.ts';
+
+test('los canales del aviso dicen por dónde salió y si falló', () => {
+  assert.deepEqual(canalesDeAviso(null), []);
+  assert.deepEqual(canalesDeAviso({ push: 'enviado', correo: 'enviado' }).map(c => [c.texto, c.ok]), [['Notificación enviada', true], ['Correo enviado', true]]);
+  const fallo = canalesDeAviso({ push: 'fallido', correo: 'fallido' });
+  assert.deepEqual(fallo.map(c => c.ok), [false, false]);
+  assert.equal(canalesDeAviso({ push: null, correo: null })[0].texto, 'Correo en espera del próximo envío');
+  assert.equal(canalesDeAviso({ push: 'sin_dispositivos', correo: 'desactivado' })[0].texto, 'Notificación: sin teléfonos registrados');
+});

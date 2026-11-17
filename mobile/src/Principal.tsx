@@ -3,11 +3,11 @@ import { Alert, Image, Linking, Pressable, RefreshControl, ScrollView, StyleShee
 import { Ionicons } from '@expo/vector-icons';
 import Acceso from './Acceso';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, enviarPrueba, marcarVistos, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, olvidarCredenciales, type Expediente } from './api';
+import { ErrorApi, enviarPrueba, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, olvidarCredenciales, type Actuacion, type Expediente } from './api';
 import { biometriaDisponible } from './almacen';
 import { activarPush, desactivarPush, pushActivo, type Pestana } from './notificaciones';
 import {
-  duracionTexto, fechaHoraBogota, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
+  canalesDeAviso, duracionTexto, fechaHoraBogota, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
 import { colores, espacio } from './tema';
 
@@ -31,6 +31,7 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
   const [error, setError] = useState('');
   const [refrescando, setRefrescando] = useState(false);
   const [reconectando, setReconectando] = useState(false);
+  const [abierto, setAbierto] = useState<Expediente | null>(null);
 
   useEffect(() => { if (destino) { setPestana(destino); onDestinoAtendido?.(); void cargar(); } }, [destino]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -52,12 +53,14 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
     return <Acceso tokenFijo={token} onCancelar={() => setReconectando(false)} onListo={async () => { setReconectando(false); await cargar(); }} />;
   }
 
+  if (abierto) return <DetalleExpediente token={token} expediente={abierto} onVolver={() => setAbierto(null)} />;
+
   return <View style={{ flex: 1 }}>
     <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
       {pestana === 'inicio' && <Inicio estado={estado} />}
-      {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} />}
+      {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
       {pestana === 'ajustes' && <Ajustes biometria={biometria} version={version} onBiometria={onBiometria} onSalir={onSalir} token={token}
         onError={setError} onReconectar={() => setReconectando(true)} />}
@@ -102,7 +105,7 @@ function Cifra({ icono, valor, texto }: { icono: Icono; valor?: number; texto: s
   </View>;
 }
 
-function Casos({ estado, expedientes, token, onCambio, onError }: { estado?: EstadoMonitor; expedientes?: Expediente[] | null; token: string; onCambio: (e: Expediente[]) => void; onError: (m: string) => void }) {
+function Casos({ estado, expedientes, token, onCambio, onError, onAbrir }: { estado?: EstadoMonitor; expedientes?: Expediente[] | null; token: string; onCambio: (e: Expediente[]) => void; onError: (m: string) => void; onAbrir: (x: Expediente) => void }) {
   const [filtro, setFiltro] = useState<'todos' | 'novedades' | 'nuevos'>('todos');
   const [busqueda, setBusqueda] = useState('');
   const lista = expedientes ?? [];
@@ -112,6 +115,7 @@ function Casos({ estado, expedientes, token, onCambio, onError }: { estado?: Est
   const sinVer = lista.filter(x => x.novedades_no_vistas > 0 || x.nuevo).length;
 
   async function ver(x: Expediente) {
+    onAbrir(x);
     if (!x.novedades_no_vistas && !x.nuevo) return;
     onCambio(lista.map(y => (y.id === x.id ? { ...y, novedades_no_vistas: 0, nuevo: false } : y)));  // se ve al instante
     try { await marcarVistos(token, x.id); } catch (err) { onError(mensajeDe(err)); }
@@ -166,12 +170,53 @@ function Actividad({ ejecuciones }: { ejecuciones?: Ejecucion[] }) {
               <Text style={s.fuerte}>{r.titulo}</Text>
               <Text style={s.cuerpo}>{r.detalle}</Text>
               <Text style={s.pequeno}>{fechaHoraBogota(x.inicio)}{dur ? ` · duró ${dur}` : ''}</Text>
+              {canalesDeAviso(x.aviso).map(c => <Text key={c.texto} style={[s.pequeno, { color: c.ok ? '#3F7D1A' : colores.error, fontWeight: '600' }]}>{c.ok ? '✓' : '✕'} {c.texto}</Text>)}
             </View>
           </View>
         </Tarjeta>;
       })}
     <Text style={s.pequeno}>Se muestran las últimas 30 revisiones. Hora de Bogotá.</Text>
   </>;
+}
+
+function DetalleExpediente({ token, expediente, onVolver }: { token: string; expediente: Expediente; onVolver: () => void }) {
+  const [actuaciones, setActuaciones] = useState<Actuacion[]>();
+  const [error, setError] = useState('');
+  const [intento, setIntento] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    setActuaciones(undefined); setError('');
+    obtenerActuaciones(token, expediente.id).then(r => { if (vivo) setActuaciones(r.actuaciones); },
+      err => { if (vivo) setError(mensajeDe(err, 'No se pudo leer el expediente.')); });
+    return () => { vivo = false; };
+  }, [token, expediente.id, intento]);
+
+  return <View style={{ flex: 1 }}>
+    <ScrollView contentContainerStyle={s.pagina}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Volver a expedientes" onPress={onVolver} style={s.volver}>
+        <Ionicons name="chevron-back" size={22} color={colores.marino} /><Text style={s.fuerte}>Expedientes</Text>
+      </Pressable>
+      <Titulo texto={`Radicado ${expediente.numero}`} subtitulo={`${expediente.cliente} · ${expediente.estado}`} />
+      {error !== '' && <><Aviso texto={error} /><Boton texto="Reintentar" secundario icono="refresh-outline" onPress={() => setIntento(n => n + 1)} /></>}
+      {error === '' && actuaciones === undefined && <>
+        <Text style={s.pequeno}>Leyendo SIGAC… puede tardar hasta un minuto.</Text>
+        <TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} />
+      </>}
+      {actuaciones && (actuaciones.length === 0 ? <Tarjeta><Text style={s.cuerpo}>Este expediente no tiene actuaciones en SIGAC.</Text></Tarjeta> :
+        actuaciones.map((a, i) => <Tarjeta key={`${a.fecha}-${i}`}>
+          <Text style={s.pequeno}>{fechaHoraBogota(a.fecha)}</Text>
+          <Text style={s.fuerte}>{a.etapa || 'Actuación'}</Text>
+          {(a.origen || a.destino) && <Text style={s.pequeno}>{a.origen}{a.origen && a.destino ? ' → ' : ''}{a.destino}</Text>}
+          {a.remitente !== '' && <Text style={s.pequeno}>Remitente: {a.remitente}</Text>}
+          <Text style={[s.cuerpo, { marginTop: 6 }]}>{a.descripcion}</Text>
+          {a.anexos.length > 0 && <View style={{ marginTop: 8 }}>
+            <Text style={s.pequeno}>Anexos ({a.anexos.length})</Text>
+            {a.anexos.map((x, j) => <Text key={j} style={s.cuerpo}>• {x.descripcion}{x.archivo ? ` — ${x.archivo}` : x.sin_enlace ? ' (sin archivo descargable)' : ''}</Text>)}
+          </View>}
+        </Tarjeta>))}
+      <Text style={s.pequeno}>Lectura en vivo desde SIGAC a través de tu cuenta. Tinotify no guarda el contenido de las actuaciones.</Text>
+    </ScrollView>
+  </View>;
 }
 
 type AjustesProps = Pick<Props, 'biometria' | 'version' | 'onBiometria' | 'onSalir'> & { token: string; onError: (m: string) => void; onReconectar: () => void };
@@ -268,6 +313,7 @@ const s = StyleSheet.create({
   cuerpo: { fontSize: 15, color: colores.textoSuave, lineHeight: 22 }, fuerte: { fontSize: 17, fontWeight: '700', color: colores.texto, marginBottom: 2 },
   pequeno: { fontSize: 13, color: colores.textoSuave, marginTop: 4 }, enlace: { fontSize: 15, color: colores.marinoSuave, fontWeight: '600', marginTop: 10, textDecorationLine: 'underline' },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  volver: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
   buscar: { borderWidth: 1, borderColor: colores.borde, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 12, fontSize: 16, color: colores.texto, backgroundColor: colores.superficie, marginBottom: 12 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: colores.azulChip }, chipOn: { backgroundColor: colores.marino }, chipTxt: { fontSize: 14, fontWeight: '600', color: colores.marino },
   seccion: { fontSize: 14, fontWeight: '700', color: colores.textoSuave, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 20, marginBottom: 8 },
