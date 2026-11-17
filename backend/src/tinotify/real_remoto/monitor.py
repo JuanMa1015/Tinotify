@@ -108,7 +108,7 @@ def planificar(previos, lecturas, semillas=None):
 
 def leer_expedientes(cliente, usuario, clave, *, tipo, total_casos, caso_login, clave_acreditacion, instancia,
                      max_expedientes=MAX_EXPEDIENTES):
-    """Una autenticación y una lectura validada por expediente. Devuelve ({caso_ref: Counter}, fallidos, listados).
+    """Una autenticación y una lectura validada por expediente. Devuelve ({caso_ref: Counter}, fallidos, listados, errores) con `errores` = conteo por (código, etapa).
 
     Un expediente que falla (salvo por sesión caducada, que aborta todo) se omite y su estado no cambia. Un historial vacío es un
     estado válido (así su primera actuación sí será novedad)."""
@@ -116,7 +116,7 @@ def leer_expedientes(cliente, usuario, clave, *, tipo, total_casos, caso_login, 
     casos = cliente.autenticar(usuario, clave, tipo=tipo, total_casos_esperado=total_casos, caso_login=caso_login, **opciones)
     if len(casos) > max_expedientes:
         raise SigacClientError("Demasiados expedientes.", codigo=CodigoHistorial.LISTADO_NO_CONFIRMADO)
-    lecturas, fallidos = {}, 0
+    lecturas, fallidos, errores = {}, 0, Counter()
     for caso in casos:
         ref = caso_ref(clave_acreditacion, instancia, caso.numero)
         try:
@@ -129,4 +129,6 @@ def leer_expedientes(cliente, usuario, clave, *, tipo, total_casos, caso_login, 
                 lecturas[ref] = Counter()
             else:
                 fallidos += 1
-    return lecturas, fallidos, len(casos)
+                # Solo valores de catálogos cerrados (código y etapa): ni números de caso ni contenido.
+                errores[(error.codigo.value, error.etapa.value)] += 1
+    return lecturas, fallidos, len(casos), errores

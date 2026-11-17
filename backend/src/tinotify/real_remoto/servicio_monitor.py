@@ -1,5 +1,8 @@
 """Servicio del monitor: guarda las credenciales cifradas y ejecuta una revisión completa. Sin texto judicial en ningún punto."""
 
+import json
+import logging
+
 from tinotify.demo.novedades import INSTANCIA_REAL
 from tinotify.integrations.sigac.sigac_client import SigacClientError, SigacSessionExpired
 from tinotify.parsers.diagnostico_historial import CodigoHistorial
@@ -8,6 +11,7 @@ from tinotify.real_remoto.cifrado import VERSION_LLAVE, cifrar_credenciales, des
 from tinotify.real_remoto.monitor import caso_ref, leer_expedientes
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
+registro = logging.getLogger("tinotify.real_remoto")
 _ACCESO_RECHAZADO = {CodigoHistorial.AUTENTICACION_NO_CONFIRMADA, CodigoHistorial.SESION_NO_CONFIRMADA,
                      CodigoHistorial.ACCESO_INCOMPLETO}
 
@@ -52,7 +56,7 @@ class ServicioMonitor:
         ejecucion = self._almacen.iniciar_ejecucion()
         cfg = self._config
         try:
-            lecturas, fallidos, listados = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
+            lecturas, fallidos, listados, errores = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login,
                 clave_acreditacion=self._clave, instancia=INSTANCIA_REAL))
         except SesionOcupada:
@@ -67,6 +71,10 @@ class ServicioMonitor:
             raise
         finally:
             del usuario, clave, caso_login  # las credenciales no sobreviven a la lectura
+        if errores:
+            # Para quien opera el servicio: cuántos expedientes fallaron y con qué código/etapa de catálogo.
+            registro.warning("monitor_casos_fallidos listados=%s leidos=%s detalle=%s", listados, len(lecturas), json.dumps(
+                sorted([{"codigo": c, "etapa": e, "n": n} for (c, e), n in errores.items()], key=lambda d: (-d["n"], d["codigo"]))))
         semillas = {caso_ref(self._clave, INSTANCIA_REAL, self._referencia.numero): self._referencia.multiconjunto()}
         try:
             plan, aviso = self._almacen.aplicar(lecturas, semillas)

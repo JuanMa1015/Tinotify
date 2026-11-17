@@ -64,6 +64,18 @@ def main(argv=None):
                 informe["sesion_activa"] = bool(estado.json().get("activa"))
             if casos is not None and casos.status_code == 200:
                 informe["expedientes"] = len(casos.json())
+            monitor = _get(c, "/real/monitor/estado", token)   # solo estado: conteos y banderas, sin SIGAC
+            if monitor is not None and monitor.status_code == 200:
+                datos = monitor.json()
+                informe["monitor"] = "activo"
+                informe["monitor_credenciales_guardadas"] = bool(datos.get("credenciales_guardadas"))
+                informe["monitor_expedientes_en_estado"] = datos.get("expedientes_en_estado")
+                informe["monitor_avisos_pendientes"] = datos.get("avisos_pendientes")
+                ultima = datos.get("ultima_ejecucion")
+                informe["monitor_ultima_ejecucion"] = None if ultima is None else ultima.get("resultado")
+            else:
+                informe["monitor"] = "no_configurado" if monitor is not None and monitor.status_code == 404 else (
+                    "sin_respuesta" if monitor is None else f"http_{monitor.status_code}")
             del token
     ok = informe["aplicacion"] == "real_remoto" and (not args.con_token or (
         informe.get("estado_con_token") == 200 and informe.get("expedientes") == 1))

@@ -408,3 +408,42 @@ def test_ni_las_respuestas_ni_los_logs_ni_el_estado_contienen_credenciales_numer
         assert secreto not in todo and secreto not in estado
     for numero in ("'101'", "'202'", "'303'", " 101,", " 202,"):
         assert numero not in estado
+
+
+def test_el_script_de_activacion_solo_pide_credenciales_a_un_destino_real_y_con_confirmacion(monkeypatch):
+    import importlib.util
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+    ruta = Path(__file__).resolve().parents[1] / "scripts" / "activar_monitor_remoto.py"
+    spec = importlib.util.spec_from_file_location("activar_monitor_t", ruta)
+    s = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(s)
+    for malo in ([], ["--url", "http://x.example"], ["--url", "https://u:p@x.example"], ["--url", "https://x.example/?a=1"]):
+        with pytest.raises(SystemExit):
+            s.main(malo)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    with pytest.raises(SystemExit):
+        s.main(["--url", "https://x.example"])
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(s.getpass, "getpass", lambda *_: pytest.fail("No debe pedir credenciales"))
+    monkeypatch.setattr("builtins.input", lambda _: "no")
+    assert s.main(["--url", "https://x.example"]) == 2                  # sin confirmación: nada de red ni credenciales
+    monkeypatch.setattr("builtins.input", lambda _: s.CONFIRMACION)
+    monkeypatch.setattr(s, "es_backend_real", lambda *a, **k: False)
+    assert s.main(["--url", "https://x.example"]) == 5                  # destino que no es el backend real: aborta sin pedir nada
+
+
+def test_los_expedientes_que_fallan_se_registran_solo_con_codigos_de_catalogo(caplog):
+    m = Mundo(casos_base())
+    m.guardar_credenciales()
+    m.ejecutar()
+    m.sim.caidos.update({202, 303})
+    caplog.set_level(logging.WARNING)
+    d = m.ejecutar().json()
+    assert d["casos_fallidos"] == 2
+    lineas = [x.getMessage() for x in caplog.records if x.getMessage().startswith("monitor_casos_fallidos")]
+    assert len(lineas) == 1 and "listados=3 leidos=1" in lineas[0]
+    detalle = json.loads(lineas[0].split("detalle=", 1)[1])
+    assert sum(x["n"] for x in detalle) == 2 and all(set(x) == {"codigo", "etapa", "n"} for x in detalle)
+    assert not any(s in " ".join(x.getMessage() for x in caplog.records) for s in ("202", "303", "EXPEDIENTE_", m.sim.usuario, m.sim.clave))
