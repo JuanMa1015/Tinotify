@@ -727,3 +727,18 @@ def test_una_pagina_principal_incompleta_se_diagnostica_solo_con_rasgos_estructu
     assert datos["primer_elemento"] == "html" and datos["formularios"] == 0 and datos["largo"] > 20
     todo = " ".join(x.getMessage() for x in caplog.records)
     assert not any(s in todo for s in ("TEXTO-INSTITUCIONAL", "PUBLICIDAD", "usuario-secreto", "clave-secreta", COOKIE))
+
+
+def test_la_estructura_diagnostica_cuenta_etiquetas_de_apertura_y_nombra_etiquetas_sin_texto():
+    from tinotify.integrations.sigac.sigac_respuestas import estructura_documento
+    d = estructura_documento("<!DOCTYPE html><HTML><head><meta http-equiv='refresh' content='0'></head><BODY><form><a href='x'>TEXTO-PRIVADO</a>"
+                             "<table></table><script>var s='SECRETO'</script></form></BODY></HTML>")
+    assert (d["html_abre"], d["body_abre"], d["formularios"], d["tablas"], d["scripts"], d["enlaces"]) == (1, 1, 1, 1, 1, 1)
+    assert d["body_cierra"] == 1 and d["html_cierra"] == 1 and d["meta_refresh"] is True and d["bs4_html"] and d["bs4_body"]
+    assert d["etiquetas"] == ["html", "head", "meta", "body", "form", "a", "table", "script"] and d["primer_elemento"] == "html"
+    assert "TEXTO-PRIVADO" not in json.dumps(d) and "SECRETO" not in json.dumps(d)
+    vacio = estructura_documento("   ")
+    assert vacio["vacio"] is True and vacio["etiquetas"] == [] and vacio["bs4_html"] is False
+    assert len(estructura_documento("".join(f"<t{i}>" for i in range(60)))["etiquetas"]) == 25
+    for ch in open(__import__("tinotify.integrations.sigac.sigac_respuestas", fromlist=["x"]).__file__, encoding="utf-8").read():
+        assert ord(ch) >= 32 or ch in "\n\r\t"  # sin caracteres de control en el código fuente

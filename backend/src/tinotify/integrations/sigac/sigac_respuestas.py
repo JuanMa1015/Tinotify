@@ -73,17 +73,29 @@ def es_selector(html):
 
 
 def estructura_documento(html):
-    """Rasgos ESTRUCTURALES de un documento (booleanos y conteos). Nunca texto, atributos, URLs ni cabeceras."""
+    """Rasgos ESTRUCTURALES de un documento: booleanos, conteos y NOMBRES de etiquetas. Nunca texto, atributos, URLs ni cabeceras."""
     if not isinstance(html, str):
         return {"tipo": type(html).__name__}
     fin = list(re.finditer(r"</html\s*>", html, re.I))
     resto = re.sub(r"<!--.*?-->|\s+", "", html[fin[-1].end():], flags=re.S) if fin else ""
     cuenta = lambda patron: len(re.findall(patron, html, re.I))
-    primero = re.search(r"<\s*([a-zA-Z][a-zA-Z0-9]*)", html)
-    return {"largo": len(html), "html_abre": cuenta(r"<html"), "html_cierra": len(fin), "body_abre": cuenta(r"<body"),
-            "body_cierra": cuenta(r"</body\s*>"), "caracteres_tras_html": len(resto), "formularios": cuenta(r"<form"),
-            "tablas": cuenta(r"<table"), "scripts": cuenta(r"<script"), "enlaces": cuenta(r"<a"),
-            "primer_elemento": primero.group(1).lower() if primero else None, "vacio": not html.strip()}
+    etiquetas = []
+    for nombre in re.findall(r"<\s*([a-zA-Z][a-zA-Z0-9:_-]*)", html):
+        nombre = nombre.lower()
+        if nombre not in etiquetas:
+            etiquetas.append(nombre)
+        if len(etiquetas) >= 25:
+            break
+    sopa = BeautifulSoup(html, "html.parser")
+    return {
+        "largo": len(html), "html_abre": cuenta(r"<html\b"), "html_cierra": len(fin), "body_abre": cuenta(r"<body\b"),
+        "body_cierra": cuenta(r"</body\s*>"), "caracteres_tras_html": len(resto), "formularios": cuenta(r"<form\b"),
+        "tablas": cuenta(r"<table\b"), "scripts": cuenta(r"<script\b"), "enlaces": cuenta(r"<a\b"),
+        "marcos": cuenta(r"<i?frame(?:set)?\b"), "meta_refresh": bool(re.search(r"http-equiv\s*=\s*[\"']?refresh", html, re.I)),
+        "bs4_html": sopa.html is not None, "bs4_body": sopa.body is not None, "etiquetas": etiquetas,
+        "primer_elemento": etiquetas[0] if etiquetas else None, "vacio": not html.strip(),
+    }
+
 
 
 def documento_completo(html):
