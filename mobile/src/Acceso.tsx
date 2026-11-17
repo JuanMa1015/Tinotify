@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Aviso, Boton, Tarjeta } from './componentes';
 import { conectar, ErrorApi } from './api';
@@ -31,7 +31,7 @@ export default function Acceso({ onListo }: { onListo: (token: string) => Promis
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <ScrollView contentContainerStyle={s.pagina} keyboardShouldPersistTaps="handled">
       <View style={s.marca}>
-        <View style={s.logo}><Ionicons name="paw" size={30} color={colores.lima} /></View>
+        <Image source={require('../assets/splash-icon.png')} accessibilityLabel="Logo de Tinotify" style={s.logo} />
         <Text style={s.nombre}>Tinotify</Text>
         <Text style={s.lema}>Te avisamos cuando haya novedades en SIGAC</Text>
       </View>
@@ -69,7 +69,7 @@ function Campo({ icono, etiqueta, valor, onCambio, secreto, derecha }: {
 const s = StyleSheet.create({
   pagina: { padding: 20, paddingTop: 56, paddingBottom: 32 },
   marca: { alignItems: 'center', marginBottom: espacio.xl },
-  logo: { width: 64, height: 64, borderRadius: 20, backgroundColor: colores.marino, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  logo: { width: 84, height: 84, borderRadius: 24, marginBottom: 12 },
   nombre: { fontSize: 38, fontWeight: '700', color: colores.texto }, lema: { fontSize: 16, color: colores.textoSuave, textAlign: 'center', marginTop: 6 },
   seccion: { fontSize: 20, fontWeight: '700', color: colores.texto, marginBottom: espacio.m },
   campo: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colores.borde, borderRadius: radios.pildora, paddingHorizontal: 16, backgroundColor: colores.superficie, marginBottom: espacio.m, minHeight: 52 },

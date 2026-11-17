@@ -9,12 +9,15 @@ const config: ExpoConfig = {
   orientation: 'portrait',
   scheme: 'tinotify',
   userInterfaceStyle: 'light',
+  icon: './assets/icon.png',
   owner: process.env.EXPO_OWNER,
   android: {
     package: 'com.tinotify.app',
     allowBackup: false,
+    adaptiveIcon: { foregroundImage: './assets/icon-foreground.png', backgroundColor: '#0C1D40' },
   },
   plugins: [
+    ['expo-splash-screen', { image: './assets/splash-icon.png', imageWidth: 180, backgroundColor: '#D9E4F4' }],
     'expo-secure-store',
     ['expo-local-authentication', { faceIDPermission: 'Tinotify usa tu huella o rostro para abrir la app.' }],
   ],
