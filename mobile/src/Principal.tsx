@@ -33,7 +33,7 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
   const cargar = useCallback(async () => {
     setRefrescando(true);
     try {
-      const [e, x] = await Promise.all([obtenerEstado(token), obtenerEjecuciones(token)]);
+      const [e, x] = await Promise.all([obtenerEstado(token), obtenerEjecuciones(token).catch(() => ({ ejecuciones: [] as Ejecucion[] }))]);  // el historial es secundario: si falla, el resto sigue
       setEstado(e); setEjecuciones(x.ejecuciones); setError('');
     } catch (err) {
       setError(mensajeDe(err, 'No se pudo actualizar.'));
