@@ -7,7 +7,7 @@ import { ErrorApi, enviarPrueba, marcarVistos, obtenerActuaciones, obtenerEjecuc
 import { biometriaDisponible } from './almacen';
 import { activarPush, desactivarPush, pushActivo, type Pestana } from './notificaciones';
 import {
-  canalesDeAviso, duracionTexto, fechaHoraBogota, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
+  canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
 import { colores, espacio } from './tema';
 
@@ -179,6 +179,28 @@ function Actividad({ ejecuciones }: { ejecuciones?: Ejecucion[] }) {
   </>;
 }
 
+function Sentido({ origen, destino }: { origen: string; destino: string }) {
+  const tipo = tipoDireccion(origen, destino);
+  const fondo = tipo === 'estudiante_asesor' ? colores.azulChip : tipo === 'asesor_estudiante' ? colores.limaSuave : colores.superficie;
+  const borde = tipo === 'estudiante_asesor' ? colores.marinoSuave : tipo === 'asesor_estudiante' ? '#7FA82B' : colores.borde;
+  return <View accessibilityLabel={`De ${origen} a ${destino}`} style={[s.sentido, { backgroundColor: fondo, borderColor: borde }]}>
+    <Text style={s.sentidoTxt}>{origen}</Text>
+    <Ionicons name="arrow-forward" size={16} color={colores.marino} />
+    <Text style={s.sentidoTxt}>{destino}</Text>
+  </View>;
+}
+
+function Descripcion({ texto }: { texto: string }) {
+  const d = parsearDescripcion(texto);
+  if (d.tipo === 'texto') return <Text style={[s.cuerpo, { marginTop: 6 }]}>{d.texto}</Text>;
+  return <View style={{ marginTop: 8, gap: 10 }}>
+    {d.filas.map((f, i) => <View key={i}>
+      <Text style={s.etiquetaFila}>{f.etiqueta}</Text>
+      <Text style={s.cuerpo}>{f.valor}</Text>
+    </View>)}
+  </View>;
+}
+
 function DetalleExpediente({ token, expediente, onVolver }: { token: string; expediente: Expediente; onVolver: () => void }) {
   const [actuaciones, setActuaciones] = useState<Actuacion[]>();
   const [error, setError] = useState('');
@@ -206,9 +228,9 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
         actuaciones.map((a, i) => <Tarjeta key={`${a.fecha}-${i}`}>
           <Text style={s.pequeno}>{fechaHoraBogota(a.fecha)}</Text>
           <Text style={s.fuerte}>{a.etapa || 'Actuación'}</Text>
-          {(a.origen || a.destino) && <Text style={s.pequeno}>{a.origen}{a.origen && a.destino ? ' → ' : ''}{a.destino}</Text>}
+          {(a.origen || a.destino) && <Sentido origen={a.origen} destino={a.destino} />}
           {a.remitente !== '' && <Text style={s.pequeno}>Remitente: {a.remitente}</Text>}
-          <Text style={[s.cuerpo, { marginTop: 6 }]}>{a.descripcion}</Text>
+          <Descripcion texto={a.descripcion} />
           {a.anexos.length > 0 && <View style={{ marginTop: 8 }}>
             <Text style={s.pequeno}>Anexos ({a.anexos.length})</Text>
             {a.anexos.map((x, j) => <Text key={j} style={s.cuerpo}>• {x.descripcion}{x.archivo ? ` — ${x.archivo}` : x.sin_enlace ? ' (sin archivo descargable)' : ''}</Text>)}
@@ -314,6 +336,9 @@ const s = StyleSheet.create({
   pequeno: { fontSize: 13, color: colores.textoSuave, marginTop: 4 }, enlace: { fontSize: 15, color: colores.marinoSuave, fontWeight: '600', marginTop: 10, textDecorationLine: 'underline' },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   volver: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
+  sentido: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, marginVertical: 6 },
+  sentidoTxt: { fontSize: 13, fontWeight: '700', color: colores.marino, textTransform: 'uppercase', letterSpacing: 0.4 },
+  etiquetaFila: { fontSize: 13, fontWeight: '700', color: colores.marinoSuave, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 },
   buscar: { borderWidth: 1, borderColor: colores.borde, borderRadius: 999, paddingHorizontal: 18, paddingVertical: 12, fontSize: 16, color: colores.texto, backgroundColor: colores.superficie, marginBottom: 12 },
   chip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999, backgroundColor: colores.azulChip }, chipOn: { backgroundColor: colores.marino }, chipTxt: { fontSize: 14, fontWeight: '600', color: colores.marino },
   seccion: { fontSize: 14, fontWeight: '700', color: colores.textoSuave, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 20, marginBottom: 8 },

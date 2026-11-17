@@ -95,3 +95,32 @@ export function resumenDeEjecucion(e: Ejecucion): { titulo: string; detalle: str
   if (e.resultado === 'en_curso') return { titulo: 'Revisión en curso', detalle: 'Aún no ha terminado.', ok: true };
   return { titulo: base.titulo, detalle: partesDetalle.join(' · ') || base.detalle, ok: !base.requiereAtencion };
 }
+
+const PREFIJO_FILAS = 'TINOTIFY_FILAS_V1:';
+export type Fila = { etiqueta: string; valor: string };
+export type Descripcion = { tipo: 'filas'; filas: Fila[] } | { tipo: 'texto'; texto: string };
+
+/** Algunas actuaciones de SIGAC son formularios: el servidor las entrega como `TINOTIFY_FILAS_V1:{"filas":[[etiqueta, valor], ...]}`. */
+export function parsearDescripcion(texto: string): Descripcion {
+  if (!texto.startsWith(PREFIJO_FILAS)) return { tipo: 'texto', texto };
+  try {
+    const datos = JSON.parse(texto.slice(PREFIJO_FILAS.length)) as { filas?: unknown };
+    if (!Array.isArray(datos.filas)) return { tipo: 'texto', texto };
+    const filas: Fila[] = [];
+    for (const f of datos.filas) {
+      if (!Array.isArray(f) || f.length !== 2 || typeof f[0] !== 'string' || typeof f[1] !== 'string') return { tipo: 'texto', texto };
+      filas.push({ etiqueta: f[0], valor: f[1].replace(/\\n/g, '\n') });
+    }
+    return filas.length ? { tipo: 'filas', filas } : { tipo: 'texto', texto };
+  } catch {
+    return { tipo: 'texto', texto };
+  }
+}
+
+export type Direccion = 'estudiante_asesor' | 'asesor_estudiante' | 'otra';
+export function tipoDireccion(origen: string, destino: string): Direccion {
+  const o = origen.trim().toLowerCase(), d = destino.trim().toLowerCase();
+  if (o === 'estudiante' && d === 'asesor') return 'estudiante_asesor';
+  if (o === 'asesor' && d === 'estudiante') return 'asesor_estudiante';
+  return 'otra';
+}
