@@ -42,3 +42,6 @@ export async function conectar(token: string, usuario: string, clave: string): P
 
 export const obtenerEstado = (token: string) => solicitar<EstadoMonitor>('/real/monitor/estado', token, { limiteMs: 90000 });
 export const olvidarCredenciales = (token: string) => solicitar<{ credenciales_guardadas: boolean }>('/real/credenciales', token, { metodo: 'DELETE' });
+
+export const registrarDispositivo = (token: string, fcm: string) => solicitar<{ registrado: boolean }>('/real/dispositivos', token, { cuerpo: { token: fcm } });
+export const quitarDispositivo = (token: string, fcm: string) => solicitar<{ borrado: boolean }>('/real/dispositivos', token, { metodo: 'DELETE', cuerpo: { token: fcm } });

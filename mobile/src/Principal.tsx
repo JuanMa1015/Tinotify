@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, Titulo } from './componentes';
 import { ErrorApi, obtenerEstado, olvidarCredenciales } from './api';
 import { biometriaDisponible } from './almacen';
+import { activarPush, desactivarPush, pushActivo } from './notificaciones';
 import { horaBogota, proximaRevision, resumenDeEstado, type EstadoMonitor } from './revisiones';
 import { colores, espacio } from './tema';
 
@@ -89,7 +90,17 @@ function Cifra({ icono, valor, texto }: { icono: keyof typeof Ionicons.glyphMap;
 
 function Ajustes({ biometria, version, onBiometria, onSalir, token, onError }: Pick<Props, 'biometria' | 'version' | 'onBiometria' | 'onSalir'> & { token: string; onError: (m: string) => void }) {
   const [hayBiometria, setHayBiometria] = useState(false);
-  useEffect(() => { void biometriaDisponible().then(setHayBiometria); }, []);
+  const [push, setPush] = useState(false);
+  useEffect(() => { void biometriaDisponible().then(setHayBiometria); void pushActivo().then(setPush); }, []);
+
+  async function cambiarPush(activar: boolean) {
+    try {
+      if (activar) {
+        if ((await activarPush(token)) === 'permiso_denegado') { onError('Permite las notificaciones en los ajustes de Android.'); return; }
+      } else await desactivarPush(token);
+      setPush(activar); onError('');
+    } catch (err) { onError(err instanceof ErrorApi ? err.message : 'No se pudo cambiar las notificaciones.'); }
+  }
 
   function confirmarOlvidar() {
     Alert.alert('Olvidar mis credenciales', 'Se borran del servidor tus datos de acceso a SIGAC y Tinotify deja de revisar tu cuenta.', [
@@ -109,6 +120,15 @@ function Ajustes({ biometria, version, onBiometria, onSalir, token, onError }: P
           <Text style={s.cuerpo}>{hayBiometria ? 'Pide tu huella o rostro al abrir la app.' : 'Configura una huella o rostro en tu teléfono para activarlo.'}</Text>
         </View>
         <Switch value={biometria} disabled={!hayBiometria} onValueChange={v => { void onBiometria(v); }} accessibilityLabel="Desbloqueo con huella o rostro" trackColor={{ true: colores.marino }} thumbColor={colores.blanco} />
+      </View>
+    </Tarjeta>
+    <Tarjeta>
+      <View style={s.ajuste}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.fuerte}>Notificaciones</Text>
+          <Text style={s.cuerpo}>Recibe un aviso en este teléfono cuando haya novedades en SIGAC.</Text>
+        </View>
+        <Switch value={push} onValueChange={v => { void cambiarPush(v); }} accessibilityLabel="Notificaciones" trackColor={{ true: colores.marino }} thumbColor={colores.blanco} />
       </View>
     </Tarjeta>
     <Boton texto="Olvidar mis credenciales" secundario icono="trash-outline" onPress={confirmarOlvidar} />
