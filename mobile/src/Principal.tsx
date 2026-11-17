@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Image, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, Titulo } from './componentes';
 import { ErrorApi, obtenerEstado, olvidarCredenciales } from './api';
@@ -35,9 +35,11 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
   return <View style={{ flex: 1 }}>
     <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
       {error !== '' && <Aviso texto={error} />}
+      <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {pestana === 'inicio' && <>
         <Titulo texto={'Buenos\ndías'} />
-        <Tarjeta oscura>
+        <Tarjeta oscura estilo={{ overflow: 'hidden' }}>
+          <Image source={require('../assets/gato-ojos.png')} accessible={false} resizeMode="contain" style={s.ojos} />
           <Text style={s.claro}><Ionicons name="calendar-outline" size={14} /> Última revisión</Text>
           <Text style={s.grande}>
             {estado?.ultima_ejecucion ? `${horaBogota(estado.ultima_ejecucion.inicio)} · ${resumen?.titulo}` : resumen?.titulo ?? 'Cargando…'}
@@ -118,6 +120,8 @@ function Ajustes({ biometria, version, onBiometria, onSalir, token, onError }: P
 
 const s = StyleSheet.create({
   pagina: { padding: 20, paddingTop: 56, paddingBottom: 16 },
+  ojos: { position: 'absolute', right: -30, top: -20, width: 150, height: 150, opacity: 0.95 },
+  huellas: { position: 'absolute', right: 12, top: 40, width: 110, height: 80, opacity: 0.6 },
   claro: { color: colores.fondo, fontSize: 15, marginTop: 4 }, grande: { color: colores.blanco, fontSize: 24, fontWeight: '700', marginVertical: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   cifras: { flexDirection: 'row', justifyContent: 'space-around' }, cifra: { alignItems: 'center', gap: 2, flex: 1 },

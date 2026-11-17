@@ -31,8 +31,7 @@ export default function Acceso({ onListo }: { onListo: (token: string) => Promis
   return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
     <ScrollView contentContainerStyle={s.pagina} keyboardShouldPersistTaps="handled">
       <View style={s.marca}>
-        <Image source={require('../assets/splash-icon.png')} accessibilityLabel="Logo de Tinotify" style={s.logo} />
-        <Text style={s.nombre}>Tinotify</Text>
+        <Image source={require('../assets/splash-icon.png')} accessibilityLabel="Tinotify" resizeMode="contain" style={s.logo} />
         <Text style={s.lema}>Te avisamos cuando haya novedades en SIGAC</Text>
       </View>
       <Tarjeta>
@@ -50,6 +49,7 @@ export default function Acceso({ onListo }: { onListo: (token: string) => Promis
         <Boton texto="Conectar" icono="paw" onPress={() => { void enviar(); }} cargando={cargando} desactivado={!completo} />
       </Tarjeta>
       <Text style={s.nota}>La primera lectura puede tardar hasta 2 minutos. Tu clave se guarda cifrada en el servidor y nunca queda en el teléfono.</Text>
+      <Image source={require('../assets/gato-asomado.png')} accessible={false} resizeMode="contain" style={s.asomado} />
     </ScrollView>
   </KeyboardAvoidingView>;
 }
@@ -69,11 +69,12 @@ function Campo({ icono, etiqueta, valor, onCambio, secreto, derecha }: {
 const s = StyleSheet.create({
   pagina: { padding: 20, paddingTop: 56, paddingBottom: 32 },
   marca: { alignItems: 'center', marginBottom: espacio.xl },
-  logo: { width: 84, height: 84, borderRadius: 24, marginBottom: 12 },
+  logo: { width: 230, height: 150, marginBottom: 4 },
   nombre: { fontSize: 38, fontWeight: '700', color: colores.texto }, lema: { fontSize: 16, color: colores.textoSuave, textAlign: 'center', marginTop: 6 },
   seccion: { fontSize: 20, fontWeight: '700', color: colores.texto, marginBottom: espacio.m },
   campo: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colores.borde, borderRadius: radios.pildora, paddingHorizontal: 16, backgroundColor: colores.superficie, marginBottom: espacio.m, minHeight: 52 },
   entrada: { flex: 1, fontSize: 16, color: colores.texto, paddingVertical: 12 },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: espacio.l }, autorizo: { flex: 1, fontSize: 14, color: colores.texto },
+  asomado: { width: '70%', height: 90, alignSelf: 'center', marginTop: 24 },
   nota: { fontSize: 14, color: colores.textoSuave, marginTop: espacio.s },
 });
