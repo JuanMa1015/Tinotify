@@ -45,3 +45,13 @@ def test_la_base_rechaza_estados_fuera_del_catalogo(mundo):
     aviso = admin.execute("INSERT INTO tinotify_real.avisos (novedades, expedientes_con_novedades) VALUES (1, 1) RETURNING id").fetchone()[0]
     with pytest.raises(psycopg.errors.CheckViolation):
         admin.execute("UPDATE tinotify_real.avisos SET push_estado = 'quizas' WHERE id = %s", (aviso,))
+
+
+def test_una_ejecucion_que_quedo_en_curso_se_cierra_como_interrumpida_solo_si_es_antigua(mundo):
+    a, admin = mundo
+    vieja = admin.execute("INSERT INTO tinotify_real.ejecuciones (inicio) VALUES (now() - interval '1 hour') RETURNING id").fetchone()[0]
+    reciente = admin.execute("INSERT INTO tinotify_real.ejecuciones (inicio) VALUES (now() - interval '2 minutes') RETURNING id").fetchone()[0]
+    a.iniciar_ejecucion()
+    estado = lambda i: admin.execute("SELECT resultado, codigo, fin IS NOT NULL FROM tinotify_real.ejecuciones WHERE id = %s", (i,)).fetchone()  # noqa: E731
+    assert estado(vieja) == ("error_interno", "interrumpida", True)
+    assert estado(reciente) == ("en_curso", None, False)                                      # una revisión en marcha no se toca

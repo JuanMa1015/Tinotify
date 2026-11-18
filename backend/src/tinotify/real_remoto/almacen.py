@@ -95,6 +95,11 @@ class AlmacenPg:
     # --- ejecuciones y estado ----------------------------------------------------------------------------------------
     def iniciar_ejecucion(self):
         with self._tx() as con:
+            # Una ejecución que quedó «en curso» (el proceso se reinició o murió a mitad de una revisión) nunca se cerraría sola y la app
+            # la mostraría para siempre como un problema: se cierra como interrumpida si lleva más de 20 minutos.
+            con.execute("UPDATE tinotify_real.ejecuciones SET fin = clock_timestamp(), resultado = 'error_interno', codigo = 'interrumpida' "
+                        "WHERE resultado = 'en_curso' AND usuario_id IS NOT DISTINCT FROM %s::uuid "
+                        "AND inicio < clock_timestamp() - interval '20 minutes'", (self._u,))
             return str(con.execute("INSERT INTO tinotify_real.ejecuciones (usuario_id) VALUES (%s::uuid) RETURNING id", (self._u,)).fetchone()[0])
 
     def cerrar_ejecucion(self, ejecucion, resultado, expedientes=None, novedades=None, codigo=None):
