@@ -33,7 +33,7 @@ from tinotify.real_remoto.fcm import ClienteFcm, CuentaServicioNoValida
 from tinotify.real_remoto.rutas_cuentas import registrar_cuentas
 from tinotify.real_remoto.rutas_monitor import registrar_monitor
 from tinotify.real_remoto.servicio_cuentas import ServicioCuentas
-from tinotify.real_remoto.servicio_monitor import ServicioMonitor
+from tinotify.real_remoto.servicio_monitor import ServicioMonitor, ServiciosMonitor
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, GestorSesion, SesionOcupada
 from tinotify.services import referencia_portable
 from tinotify.services.consulta_real_local import IdentidadExpedienteNoVerificada
@@ -94,7 +94,7 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
     gestor = GestorSesion(config=config, politica=politica, referencia=referencia, historial=historial,
                           fabrica_cliente=fabrica_cliente, reloj=reloj)
     acceso = Acceso(config.token, reloj=reloj)
-    servicio_monitor = servicio_cuentas = None
+    servicio_monitor = servicio_cuentas = servicios = None
     if config.monitor is not None:
         if clave_acreditacion is None:
             try:
@@ -114,8 +114,9 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
                 fcm = ClienteFcm(config.fcm_cuenta)
             except CuentaServicioNoValida:
                 raise ConfiguracionInsegura("fcm_cuenta_no_valida") from None
-        servicio_monitor = ServicioMonitor(config=config, almacen=almacen, sesiones=gestor, referencia=referencia,
-                                           clave_acreditacion=clave_acreditacion, fcm=fcm)
+        servicios = ServiciosMonitor(config=config, almacen=almacen, sesiones=gestor, referencia=referencia,
+                                     clave_acreditacion=clave_acreditacion, fcm=fcm)
+        servicio_monitor = servicios.para(None)
         if config.cuentas:
             from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg  # carga perezosa: solo si las cuentas están activas
             llave_cuentas = hashlib.sha256(b"tinotify-cuentas|" + config.monitor.clave_cifrado).digest()
@@ -178,6 +179,20 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         return _respuesta(500, "Error interno")
 
     bearer = HTTPBearer(auto_error=False)
+
+    def servicio_actual(credencial: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
+        """Quién llama: un usuario (token tn_...) o el propietario (token de la app). Devuelve SU servicio: cada uno ve solo sus datos."""
+        token = credencial.credentials if credencial else None
+        if servicio_cuentas is not None and token and token.startswith("tn_"):
+            usuario = servicio_cuentas.autenticar(token)
+            if usuario is not None:
+                return servicios.para(usuario.id)
+        resultado = acceso.comprobar(token)
+        if resultado is True:
+            return servicios.para(None)
+        if resultado is None:
+            raise HTTPException(429, "Demasiados intentos")
+        raise HTTPException(401, "Acceso requerido", headers={"WWW-Authenticate": "Bearer"})
 
     def autorizar(credencial: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
         resultado = acceso.comprobar(credencial.credentials if credencial else None)
@@ -264,6 +279,6 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
     if servicio_cuentas is not None:
         registrar_cuentas(app, servicio=servicio_cuentas, protegidas_app=protegidas, reloj=reloj)
     if servicio_monitor is not None:
-        registrar_monitor(app, servicio=servicio_monitor, config=config, protegidas_app=protegidas,
+        registrar_monitor(app, servicios=servicios, servicio_actual=servicio_actual, config=config, protegidas_app=protegidas,
                           http_desde_sigac=_http_desde_sigac, reloj=reloj)
     return app

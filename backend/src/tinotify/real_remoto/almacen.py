@@ -5,6 +5,7 @@ Los mensajes de error nunca incluyen SQL, parámetros, credenciales ni datos: so
 """
 
 from collections import Counter
+import copy
 from contextlib import contextmanager
 
 from tinotify.real_remoto.config import ConfigPg
@@ -24,6 +25,17 @@ class AlmacenIncompatible(Exception):
 class AlmacenPg:
     def __init__(self, config: ConfigPg):
         self._c = config
+        self._u = None  # dueño de los datos: None = propietario (tu cuenta de siempre); si no, el id de un usuario
+
+    def de(self, usuario):
+        """Vista del almacén ligada a un usuario (None = propietario). Comparte la configuración; no abre conexiones."""
+        vista = copy.copy(self)
+        vista._u = usuario
+        return vista
+
+    def usuarios_con_credenciales(self):
+        with self._tx() as con:
+            return [str(f[0]) for f in con.execute("SELECT usuario_id FROM tinotify_real.credenciales_usuario ORDER BY creado_en").fetchall()]
 
     @contextmanager
     def _tx(self):
@@ -54,24 +66,36 @@ class AlmacenPg:
     # --- credenciales cifradas ---------------------------------------------------------------------------------------
     def credenciales(self):
         with self._tx() as con:
-            fila = con.execute("SELECT version_llave, nonce, cifrado FROM tinotify_real.credenciales").fetchone()
+            if self._u is None:
+                fila = con.execute("SELECT version_llave, nonce, cifrado FROM tinotify_real.credenciales").fetchone()
+            else:
+                fila = con.execute("SELECT version_llave, nonce, cifrado FROM tinotify_real.credenciales_usuario WHERE usuario_id = %s::uuid",
+                                   (self._u,)).fetchone()
         return None if fila is None else (fila[0], bytes(fila[1]), bytes(fila[2]))
 
     def guardar_credenciales(self, version, nonce, cifrado):
         with self._tx() as con:
-            con.execute(
-                "INSERT INTO tinotify_real.credenciales (version_llave, nonce, cifrado) VALUES (%s, %s, %s) "
-                "ON CONFLICT (id) DO UPDATE SET version_llave = EXCLUDED.version_llave, nonce = EXCLUDED.nonce, "
-                "cifrado = EXCLUDED.cifrado, actualizado_en = clock_timestamp()", (version, nonce, cifrado))
+            if self._u is None:
+                con.execute(
+                    "INSERT INTO tinotify_real.credenciales (version_llave, nonce, cifrado) VALUES (%s, %s, %s) "
+                    "ON CONFLICT (id) DO UPDATE SET version_llave = EXCLUDED.version_llave, nonce = EXCLUDED.nonce, "
+                    "cifrado = EXCLUDED.cifrado, actualizado_en = clock_timestamp()", (version, nonce, cifrado))
+            else:
+                con.execute(
+                    "INSERT INTO tinotify_real.credenciales_usuario (usuario_id, version_llave, nonce, cifrado) VALUES (%s::uuid, %s, %s, %s) "
+                    "ON CONFLICT (usuario_id) DO UPDATE SET version_llave = EXCLUDED.version_llave, nonce = EXCLUDED.nonce, "
+                    "cifrado = EXCLUDED.cifrado, actualizado_en = clock_timestamp()", (self._u, version, nonce, cifrado))
 
     def olvidar_credenciales(self):
         with self._tx() as con:
-            return con.execute("DELETE FROM tinotify_real.credenciales").rowcount > 0
+            if self._u is None:
+                return con.execute("DELETE FROM tinotify_real.credenciales").rowcount > 0
+            return con.execute("DELETE FROM tinotify_real.credenciales_usuario WHERE usuario_id = %s::uuid", (self._u,)).rowcount > 0
 
     # --- ejecuciones y estado ----------------------------------------------------------------------------------------
     def iniciar_ejecucion(self):
         with self._tx() as con:
-            return str(con.execute("INSERT INTO tinotify_real.ejecuciones DEFAULT VALUES RETURNING id").fetchone()[0])
+            return str(con.execute("INSERT INTO tinotify_real.ejecuciones (usuario_id) VALUES (%s::uuid) RETURNING id", (self._u,)).fetchone()[0])
 
     def cerrar_ejecucion(self, ejecucion, resultado, expedientes=None, novedades=None, codigo=None):
         with self._tx() as con:
@@ -88,16 +112,19 @@ class AlmacenPg:
             con.execute("SELECT pg_advisory_xact_lock(%s)", (CLAVE_BLOQUEO_EJECUCION,))
             previos = {}
             for ref, acreditado, generacion, anomalia in con.execute(
-                    "SELECT caso_ref, acreditado, generacion, anomalia FROM tinotify_real.estado_expediente"):
+                    "SELECT caso_ref, acreditado, generacion, anomalia FROM tinotify_real.estado_expediente "
+                    "WHERE usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)):
                 previos[ref] = [Counter(), acreditado, generacion, anomalia]
-            for ref, huella, cantidad in con.execute("SELECT caso_ref, huella, cantidad FROM tinotify_real.huellas"):
+            for ref, huella, cantidad in con.execute(
+                    "SELECT h.caso_ref, h.huella, h.cantidad FROM tinotify_real.huellas h JOIN tinotify_real.estado_expediente e "
+                    "ON e.caso_ref = h.caso_ref WHERE e.usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)):
                 previos[ref][0][huella] = cantidad
             plan = planificar({r: EstadoPrevio(h, a, g, an) for r, (h, a, g, an) in previos.items()}, lecturas, semillas)
             for c in plan.cambios:
                 total = c.huellas.total()
                 if not c.en_bd:
-                    con.execute("INSERT INTO tinotify_real.estado_expediente (caso_ref, acreditado, actuaciones, generacion, anomalia) "
-                                "VALUES (%s, %s, %s, %s, %s)", (c.caso_ref, c.acreditado, total, c.generacion, c.anomalia))
+                    con.execute("INSERT INTO tinotify_real.estado_expediente (caso_ref, acreditado, actuaciones, generacion, anomalia, usuario_id) "
+                                "VALUES (%s, %s, %s, %s, %s, %s::uuid)", (c.caso_ref, c.acreditado, total, c.generacion, c.anomalia, self._u))
                 else:
                     con.execute("UPDATE tinotify_real.estado_expediente SET acreditado = %s, actuaciones = %s, generacion = %s, "
                                 "anomalia = %s, ultima_lectura = clock_timestamp() WHERE caso_ref = %s",
@@ -113,9 +140,9 @@ class AlmacenPg:
             aviso = None
             if plan.requiere_aviso:
                 aviso = str(con.execute(
-                    "INSERT INTO tinotify_real.avisos (expedientes_con_novedades, novedades, expedientes_nuevos, anomalias) "
-                    "VALUES (%s, %s, %s, %s) RETURNING id",
-                    (plan.expedientes_con_novedades, plan.novedades, plan.expedientes_nuevos, plan.anomalias)).fetchone()[0])
+                    "INSERT INTO tinotify_real.avisos (expedientes_con_novedades, novedades, expedientes_nuevos, anomalias, usuario_id) "
+                    "VALUES (%s, %s, %s, %s, %s::uuid) RETURNING id",
+                    (plan.expedientes_con_novedades, plan.novedades, plan.expedientes_nuevos, plan.anomalias, self._u)).fetchone()[0])
         return plan, aviso
 
     # --- avisos y estado visible ------------------------------------------------------------------------------------
@@ -123,9 +150,19 @@ class AlmacenPg:
         with self._tx() as con:
             filas = con.execute(
                 "SELECT id, expedientes_con_novedades, novedades, expedientes_nuevos, anomalias, intentos "
-                "FROM tinotify_real.avisos WHERE entregado_en IS NULL ORDER BY creado_en, id").fetchall()
+                "FROM tinotify_real.avisos WHERE entregado_en IS NULL AND usuario_id IS NOT DISTINCT FROM %s::uuid "
+                "ORDER BY creado_en, id", (self._u,)).fetchall()
         return [{"id": str(f[0]), "expedientes_con_novedades": f[1], "novedades": f[2], "expedientes_nuevos": f[3],
                  "anomalias": f[4], "intentos": f[5]} for f in filas]
+
+    def avisos_pendientes_todos(self):
+        """Para el ciclo de Actions (token del monitor): los avisos pendientes de TODOS, con su dueño (None = propietario)."""
+        with self._tx() as con:
+            filas = con.execute(
+                "SELECT id, expedientes_con_novedades, novedades, expedientes_nuevos, anomalias, intentos, usuario_id "
+                "FROM tinotify_real.avisos WHERE entregado_en IS NULL ORDER BY creado_en, id").fetchall()
+        return [{"id": str(f[0]), "expedientes_con_novedades": f[1], "novedades": f[2], "expedientes_nuevos": f[3],
+                 "anomalias": f[4], "intentos": f[5], "usuario": None if f[6] is None else str(f[6])} for f in filas]
 
     def marcar_entregado(self, aviso):
         with self._tx() as con:
@@ -134,10 +171,17 @@ class AlmacenPg:
 
     def estado(self):
         with self._tx() as con:
-            ultima = con.execute("SELECT resultado, inicio, fin FROM tinotify_real.ejecuciones ORDER BY inicio DESC LIMIT 1").fetchone()
-            expedientes = con.execute("SELECT count(*) FROM tinotify_real.estado_expediente").fetchone()[0]
-            pendientes = con.execute("SELECT count(*) FROM tinotify_real.avisos WHERE entregado_en IS NULL").fetchone()[0]
-            credenciales = con.execute("SELECT count(*) FROM tinotify_real.credenciales").fetchone()[0] > 0
+            ultima = con.execute("SELECT resultado, inicio, fin FROM tinotify_real.ejecuciones "
+                                 "WHERE usuario_id IS NOT DISTINCT FROM %s::uuid ORDER BY inicio DESC LIMIT 1", (self._u,)).fetchone()
+            expedientes = con.execute("SELECT count(*) FROM tinotify_real.estado_expediente "
+                                      "WHERE usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)).fetchone()[0]
+            pendientes = con.execute("SELECT count(*) FROM tinotify_real.avisos WHERE entregado_en IS NULL "
+                                     "AND usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)).fetchone()[0]
+            if self._u is None:
+                credenciales = con.execute("SELECT count(*) FROM tinotify_real.credenciales").fetchone()[0] > 0
+            else:
+                credenciales = con.execute("SELECT count(*) FROM tinotify_real.credenciales_usuario WHERE usuario_id = %s::uuid",
+                                           (self._u,)).fetchone()[0] > 0
         return {"credenciales_guardadas": credenciales, "expedientes_en_estado": expedientes, "avisos_pendientes": pendientes,
                 "ultima_ejecucion": None if ultima is None else {
                     "resultado": ultima[0], "inicio": ultima[1].isoformat(), "fin": ultima[2].isoformat() if ultima[2] else None}}
@@ -145,16 +189,19 @@ class AlmacenPg:
     # --- dispositivos (push) -------------------------------------------------------------------------------------------
     def registrar_dispositivo(self, token):
         with self._tx() as con:
-            con.execute("INSERT INTO tinotify_real.dispositivos (token) VALUES (%s) "
-                        "ON CONFLICT (token) DO UPDATE SET ultimo_uso = clock_timestamp()", (token,))
+            con.execute("INSERT INTO tinotify_real.dispositivos (token, usuario_id) VALUES (%s, %s::uuid) "
+                        "ON CONFLICT (token) DO UPDATE SET ultimo_uso = clock_timestamp(), usuario_id = EXCLUDED.usuario_id",
+                        (token, self._u))
 
     def dispositivos(self):
         with self._tx() as con:
-            return [f[0] for f in con.execute("SELECT token FROM tinotify_real.dispositivos ORDER BY creado_en").fetchall()]
+            return [f[0] for f in con.execute("SELECT token FROM tinotify_real.dispositivos "
+                                              "WHERE usuario_id IS NOT DISTINCT FROM %s::uuid ORDER BY creado_en", (self._u,)).fetchall()]
 
     def borrar_dispositivo(self, token):
         with self._tx() as con:
-            return con.execute("DELETE FROM tinotify_real.dispositivos WHERE token = %s", (token,)).rowcount > 0
+            return con.execute("DELETE FROM tinotify_real.dispositivos WHERE token = %s AND usuario_id IS NOT DISTINCT FROM %s::uuid",
+                               (token, self._u)).rowcount > 0
 
     def ejecuciones_recientes(self, limite):
         """Últimas ejecuciones, de la más reciente a la más antigua: solo estados de catálogo y conteos, más el estado de los canales
@@ -165,8 +212,9 @@ class AlmacenPg:
                 "FROM tinotify_real.ejecuciones e LEFT JOIN LATERAL ("
                 "  SELECT id, push_estado, correo_estado FROM tinotify_real.avisos x "
                 "  WHERE x.creado_en >= e.inicio AND x.creado_en <= coalesce(e.fin, e.inicio + interval '15 minutes') "
-                "  ORDER BY x.creado_en LIMIT 1) a ON true "
-                "ORDER BY e.inicio DESC LIMIT %s", (max(1, min(int(limite), 100)),)).fetchall()
+                "  AND x.usuario_id IS NOT DISTINCT FROM e.usuario_id ORDER BY x.creado_en LIMIT 1) a ON true "
+                "WHERE e.usuario_id IS NOT DISTINCT FROM %s::uuid "
+                "ORDER BY e.inicio DESC LIMIT %s", (self._u, max(1, min(int(limite), 100)))).fetchall()
         return [{"inicio": f[0].isoformat(), "fin": f[1].isoformat() if f[1] else None, "resultado": f[2],
                  "expedientes": f[3], "novedades": f[4], "codigo": f[5],
                  "aviso": {"push": f[7], "correo": f[8]} if f[6] else None} for f in filas]
@@ -194,14 +242,16 @@ class AlmacenPg:
 
     def expedientes(self):
         with self._tx() as con:
-            filas = con.execute("SELECT caso_ref, version_llave, nonce, cifrado, novedades_no_vistas, nuevo, ultima_novedad "
-                                "FROM tinotify_real.expedientes").fetchall()
+            filas = con.execute("SELECT x.caso_ref, x.version_llave, x.nonce, x.cifrado, x.novedades_no_vistas, x.nuevo, x.ultima_novedad "
+                                "FROM tinotify_real.expedientes x JOIN tinotify_real.estado_expediente e ON e.caso_ref = x.caso_ref "
+                                "WHERE e.usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)).fetchall()
         return [(f[0], f[1], bytes(f[2]), bytes(f[3]), f[4], f[5], f[6].isoformat() if f[6] else None) for f in filas]
 
     def marcar_vistos(self, caso_ref=None):
         with self._tx() as con:
+            propios = "caso_ref IN (SELECT caso_ref FROM tinotify_real.estado_expediente WHERE usuario_id IS NOT DISTINCT FROM %s::uuid)"
             if caso_ref is None:
                 return con.execute("UPDATE tinotify_real.expedientes SET novedades_no_vistas = 0, nuevo = false "
-                                   "WHERE novedades_no_vistas > 0 OR nuevo").rowcount
-            return con.execute("UPDATE tinotify_real.expedientes SET novedades_no_vistas = 0, nuevo = false WHERE caso_ref = %s",
-                               (caso_ref,)).rowcount
+                                   f"WHERE (novedades_no_vistas > 0 OR nuevo) AND {propios}", (self._u,)).rowcount
+            return con.execute("UPDATE tinotify_real.expedientes SET novedades_no_vistas = 0, nuevo = false "
+                               f"WHERE caso_ref = %s AND {propios}", (caso_ref, self._u)).rowcount

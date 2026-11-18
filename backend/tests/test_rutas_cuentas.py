@@ -52,11 +52,12 @@ def test_registro_login_sesion_y_logout(mundo):
     assert mundo.c.get("/auth/yo", headers=bearer(token)).status_code == 401
 
 
-def test_el_token_de_un_usuario_no_abre_los_datos_del_monitor(mundo):
+def test_el_token_de_un_usuario_solo_abre_sus_propios_datos(mundo):
     token = registrar(mundo).json()["token"]
-    for ruta in ("/real/expedientes", "/real/monitor/estado", "/real/monitor/ejecuciones", "/real/cases"):
-        assert mundo.c.get(ruta, headers=bearer(token)).status_code == 401   # fase 1: los datos siguen siendo solo del propietario
-    assert mundo.c.post("/auth/invitaciones", headers=bearer(token)).status_code == 401   # y un usuario no crea invitaciones
+    assert mundo.c.get("/real/expedientes", headers=bearer(token)).json() == {"expedientes": []}      # vacío: no ve los del propietario
+    assert mundo.c.get("/real/monitor/estado", headers=bearer(token)).json()["credenciales_guardadas"] is False
+    assert mundo.c.get("/real/cases", headers=bearer(token)).status_code == 401                       # rutas del propietario: solo con su token
+    assert mundo.c.post("/auth/invitaciones", headers=bearer(token)).status_code == 401              # un usuario no crea invitaciones
 
 
 def test_el_token_del_propietario_no_es_una_sesion_de_usuario(mundo):

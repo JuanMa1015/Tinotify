@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, SecretStr, StringConstraints
 from starlette.concurrency import run_in_threadpool
 
 from tinotify.integrations.sigac.sigac_client import SigacClientError
@@ -23,7 +23,8 @@ from tinotify.real_remoto.servicio_monitor import ExpedienteNoEncontrado, SinCre
 registro = logging.getLogger("tinotify.real_remoto")
 
 
-def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_desde_sigac, reloj):
+def registrar_monitor(app: FastAPI, *, servicios, servicio_actual, config, protegidas_app, http_desde_sigac, reloj):
+    servicio = servicios.para(None)  # propietario: lo usan las rutas del monitor (token de Actions)
     acceso_monitor = Acceso(config.monitor.token_monitor, reloj=reloj)
     bearer = HTTPBearer(auto_error=False)
 
@@ -41,29 +42,29 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
         registro.warning("almacen_no_disponible")
         return HTTPException(503, "Almacen no disponible", headers={"Retry-After": "30"})
 
-    @app.get("/real/monitor/estado", dependencies=protegidas_app)
-    async def estado_monitor():
+    @app.get("/real/monitor/estado")
+    async def estado_monitor(servicio: Annotated[object, Depends(servicio_actual)]):
         try:
             return await run_in_threadpool(servicio.estado)
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
-    @app.get("/real/monitor/ejecuciones", dependencies=protegidas_app)
-    async def ejecuciones(limite: Annotated[int, Query(ge=1, le=100)] = 30):
+    @app.get("/real/monitor/ejecuciones")
+    async def ejecuciones(servicio: Annotated[object, Depends(servicio_actual)], limite: Annotated[int, Query(ge=1, le=100)] = 30):
         try:
             return {"ejecuciones": await run_in_threadpool(servicio.ejecuciones, limite)}
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
-    @app.get("/real/expedientes", dependencies=protegidas_app)
-    async def expedientes():
+    @app.get("/real/expedientes")
+    async def expedientes(servicio: Annotated[object, Depends(servicio_actual)]):
         try:
             return {"expedientes": await run_in_threadpool(servicio.expedientes)}
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
-    @app.get("/real/expedientes/{caso}/actuaciones", dependencies=protegidas_app)
-    async def actuaciones_expediente(caso: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")]):
+    @app.get("/real/expedientes/{caso}/actuaciones")
+    async def actuaciones_expediente(servicio: Annotated[object, Depends(servicio_actual)], caso: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")]):
         try:
             return {"actuaciones": await run_in_threadpool(servicio.historial_expediente, caso)}
         except ExpedienteNoEncontrado:
@@ -86,15 +87,15 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
         model_config = ConfigDict(extra="forbid")
         id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")] | None = None
 
-    @app.post("/real/expedientes/vistos", dependencies=protegidas_app)
-    async def marcar_vistos(datos: Vistos):
+    @app.post("/real/expedientes/vistos")
+    async def marcar_vistos(servicio: Annotated[object, Depends(servicio_actual)], datos: Vistos):
         try:
             return {"actualizados": await run_in_threadpool(servicio.marcar_vistos, datos.id)}
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
-    @app.post("/real/dispositivos/prueba", dependencies=protegidas_app)
-    async def prueba_push():
+    @app.post("/real/dispositivos/prueba")
+    async def prueba_push(servicio: Annotated[object, Depends(servicio_actual)]):
         try:
             r = await run_in_threadpool(servicio.enviar_prueba)
         except (AlmacenNoDisponible, AlmacenIncompatible):
@@ -103,18 +104,25 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
             raise HTTPException(412, "Las notificaciones no están configuradas en el servidor")
         return {"enviados": r[0], "invalidos": r[1]}
 
-    @app.delete("/real/credenciales", dependencies=protegidas_app)
-    async def olvidar_credenciales():
+    @app.delete("/real/credenciales")
+    async def olvidar_credenciales(servicio: Annotated[object, Depends(servicio_actual)]):
         try:
             await run_in_threadpool(servicio.olvidar_credenciales)
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
         return {"credenciales_guardadas": False}
 
-    @app.post("/real/monitor/ejecutar", dependencies=protegidas_monitor)
-    async def ejecutar():
+    @app.get("/real/monitor/usuarios", dependencies=protegidas_monitor)
+    async def usuarios():
         try:
-            return await run_in_threadpool(servicio.ejecutar)
+            return await run_in_threadpool(servicios.usuarios)
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+
+    @app.post("/real/monitor/ejecutar", dependencies=protegidas_monitor)
+    async def ejecutar(usuario: Annotated[str, Query(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")] | None = None):
+        try:
+            return await run_in_threadpool(servicios.para(usuario).ejecutar)
         except SinCredenciales:
             raise HTTPException(412, "No hay credenciales guardadas") from None
         except CifradoNoValido:
@@ -129,20 +137,44 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
+    class Conexion(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        usuario: Annotated[SecretStr, StringConstraints(min_length=1, max_length=200)]
+        clave: Annotated[SecretStr, StringConstraints(min_length=1, max_length=200)]
+        caso_login: Annotated[SecretStr, StringConstraints(max_length=100)] | None = None
+
+    @app.post("/real/conectar")
+    async def conectar(servicio: Annotated[object, Depends(servicio_actual)], datos: Conexion):
+        """Guarda las credenciales de SIGAC de este usuario (cifradas) tras comprobar que SIGAC las acepta. La clave nunca se devuelve."""
+        try:
+            n = await run_in_threadpool(servicio.conectar, datos.usuario.get_secret_value(), datos.clave.get_secret_value(),
+                                        datos.caso_login.get_secret_value() if datos.caso_login else None)
+        except SesionOcupada:
+            raise HTTPException(409, "Ya hay un acceso en curso") from None
+        except DemasiadosIntentosLogin as error:
+            raise HTTPException(429, "Demasiados intentos de acceso; espera", headers={"Retry-After": str(error.espera_s)}) from None
+        except SigacClientError as error:
+            raise http_desde_sigac(error) from None
+        except CifradoNoValido:
+            raise HTTPException(503, "Servicio no configurado") from None
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+        return {"conectado": True, "expedientes": n}
+
     class Dispositivo(BaseModel):
         model_config = ConfigDict(extra="forbid")
         token: Annotated[str, StringConstraints(min_length=20, max_length=4096, pattern=r"^\S+$")]
 
-    @app.post("/real/dispositivos", dependencies=protegidas_app)
-    async def registrar_dispositivo(datos: Dispositivo):
+    @app.post("/real/dispositivos")
+    async def registrar_dispositivo(servicio: Annotated[object, Depends(servicio_actual)], datos: Dispositivo):
         try:
             await run_in_threadpool(servicio.registrar_dispositivo, datos.token)
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
         return {"registrado": True}
 
-    @app.delete("/real/dispositivos", dependencies=protegidas_app)
-    async def borrar_dispositivo(datos: Dispositivo):
+    @app.delete("/real/dispositivos")
+    async def borrar_dispositivo(servicio: Annotated[object, Depends(servicio_actual)], datos: Dispositivo):
         try:
             borrado = await run_in_threadpool(servicio.borrar_dispositivo, datos.token)
         except (AlmacenNoDisponible, AlmacenIncompatible):
@@ -167,7 +199,7 @@ def registrar_monitor(app: FastAPI, *, servicio, config, protegidas_app, http_de
     @app.get("/real/monitor/avisos", dependencies=protegidas_monitor)
     async def avisos():
         try:
-            return {"avisos": await run_in_threadpool(servicio.avisos_pendientes)}
+            return {"avisos": await run_in_threadpool(servicios.avisos_pendientes_todos)}
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
