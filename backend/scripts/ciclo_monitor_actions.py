@@ -10,6 +10,7 @@ Un aviso se confirma como entregado únicamente tras enviar el correo (entrega a
 """
 
 from email.message import EmailMessage
+import html
 import os
 import smtplib
 import sys
@@ -74,7 +75,10 @@ def _informar(c, cabeceras, aviso, estado):
         pass
 
 
-def construir_correo(aviso, origen, destino):
+URL_SIGAC = "https://sigac.udea.edu.co/sigac/"
+
+
+def _resumen(aviso):
     partes = []
     if aviso.get("novedades"):
         partes.append(f"{aviso['novedades']} actuación(es) nueva(s) en {aviso['expedientes_con_novedades']} expediente(s)")
@@ -82,9 +86,36 @@ def construir_correo(aviso, origen, destino):
         partes.append(f"{aviso['expedientes_nuevos']} expediente(s) nuevo(s) en tu cuenta")
     if aviso.get("anomalias"):
         partes.append(f"{aviso['anomalias']} lectura(s) a revisar")
+    return "; ".join(partes).capitalize() + "."
+
+
+def _linea(x):
+    base = f"Radicado {x['numero']} — {x['cliente']}"
+    if x.get("nuevo"):
+        return f"{base}: expediente nuevo"
+    n = x.get("novedades") or 0
+    return f"{base}: {n} actuación(es) nueva(s)" if n else base
+
+
+def construir_correo(aviso, origen, destino, url_app=None):
+    """Correo con el detalle (radicado y nombre de cada expediente con novedades) y dos botones: SIGAC y la app. El correo va al propio
+    buzón del usuario; el contenido de las actuaciones nunca se incluye."""
+    expedientes = aviso.get("expedientes") or []
     mensaje = EmailMessage()
     mensaje["Subject"], mensaje["From"], mensaje["To"] = "Tinotify: hay novedades en SIGAC", origen, destino
-    mensaje.set_content("; ".join(partes).capitalize() + ".\n\nEntra a SIGAC para ver el detalle. Este aviso no incluye datos del caso.")
+    lineas = [_linea(x) for x in expedientes]
+    texto = _resumen(aviso) + ("\n\n" + "\n".join("• " + l for l in lineas) if lineas else "")
+    texto += f"\n\nIr a SIGAC: {URL_SIGAC}" + (f"\nAbrir Tinotify: {url_app}" if url_app else "")
+    texto += "\n\nTinotify no está afiliado a SIGAC. Confirma siempre en el sistema oficial."
+    mensaje.set_content(texto)
+    items = "".join(f"<li>{html.escape(l)}</li>" for l in lineas)
+    boton = "display:inline-block;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:700;margin:6px 8px 6px 0;"
+    cuerpo = (f"<div style='font-family:Arial,sans-serif;color:#14213D;max-width:520px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
+              f"<p style='font-size:16px'>{html.escape(_resumen(aviso))}</p>" + (f"<ul style='font-size:15px;line-height:1.6'>{items}</ul>" if items else "") +
+              f"<p><a href='{URL_SIGAC}' style='{boton}background:#14213D;color:#fff'>Ir a SIGAC</a>" +
+              (f"<a href='{html.escape(url_app)}' style='{boton}background:#A8D83F;color:#14213D'>Abrir Tinotify</a>" if url_app else "") + "</p>"
+              "<p style='font-size:12px;color:#52627C'>Tinotify no está afiliado a SIGAC. Confirma siempre en el sistema oficial.</p></div>")
+    mensaje.add_alternative(cuerpo, subtype="html")
     return mensaje
 
 
@@ -136,7 +167,7 @@ def main(entorno=None, enviar=enviar_correo, cliente=None):
                     c.post(f"/real/monitor/avisos/{aviso['id']}/entregado", headers=cabeceras, timeout=60)  # nada más que hacer por correo
                 continue
             try:
-                enviar(construir_correo(aviso, usuario, destino), usuario, clave)
+                enviar(construir_correo(aviso, usuario, destino, url.rstrip('/') + '/abrir'), usuario, clave)
             except (OSError, smtplib.SMTPException):
                 _informar(c, cabeceras, aviso, "fallido")
                 envio_fallido = True  # sin confirmar: el aviso sigue pendiente y se reintenta en la próxima ejecución

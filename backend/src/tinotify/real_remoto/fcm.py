@@ -59,10 +59,10 @@ class ClienteFcm:
         self._expira = self._reloj() + int(cuerpo.get("expires_in", VIGENCIA_S))
         return self._acceso
 
-    def enviar(self, token_dispositivo: str, titulo: str, cuerpo: str, datos: dict | None = None) -> str:
+    def enviar(self, token_dispositivo: str, titulo: str, cuerpo: str, datos: dict | None = None, privado: bool = False) -> str:
         """Devuelve OK, TOKEN_INVALIDO (hay que borrar el dispositivo) o ERROR (reintentable)."""
         mensaje = {"token": token_dispositivo, "notification": {"title": titulo, "body": cuerpo},
-                   "android": {"priority": "HIGH", "notification": {"channel_id": "avisos"}}}
+                   "android": {"priority": "HIGH", "notification": {"channel_id": "avisos", **({"visibility": "PRIVATE"} if privado else {})}}}
         if datos:
             mensaje["data"] = {str(k): str(v) for k, v in datos.items()}
         try:

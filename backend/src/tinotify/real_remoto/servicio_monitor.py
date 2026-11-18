@@ -60,13 +60,15 @@ class ServicioMonitor:
     def borrar_dispositivo(self, token):
         return self._almacen.borrar_dispositivo(token)
 
-    def _notificar_push(self, plan):
+    def _notificar_push(self, plan, metadatos=None):
         """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Solo conteos: nunca radicados
         ni nombres, porque el texto se ve en la pantalla de bloqueo."""
         if self._fcm is None:
             return "no_configurado"
-        cuerpo, pestana = _texto_push(plan)
-        enviados, invalidos, errores = self._enviar_a_dispositivos(cuerpo, {"tipo": "novedades", "pestana": pestana})
+        cuerpo, pestana, expediente = _texto_push(plan, metadatos)
+        datos = {"tipo": "novedades", "pestana": pestana, **({"expediente": expediente} if expediente else {})}
+        # `privado`: en la pantalla de bloqueo con seguridad el teléfono oculta el texto (que ahora lleva el radicado) hasta desbloquear.
+        enviados, invalidos, errores = self._enviar_a_dispositivos(cuerpo, datos, privado=True)
         return "enviado" if enviados else "fallido" if (invalidos or errores) else "sin_dispositivos"
 
     def enviar_prueba(self):
@@ -76,11 +78,11 @@ class ServicioMonitor:
         enviados, invalidos, _ = self._enviar_a_dispositivos("Notificación de prueba: tu teléfono recibe los avisos de Tinotify.", {"tipo": "prueba", "pestana": "inicio"})
         return enviados, invalidos
 
-    def _enviar_a_dispositivos(self, cuerpo, datos):
+    def _enviar_a_dispositivos(self, cuerpo, datos, privado=False):
         enviados = invalidos = errores = 0
         try:
             for token in self._almacen.dispositivos():
-                resultado = self._fcm.enviar(token, "Tinotify", cuerpo, datos)
+                resultado = self._fcm.enviar(token, "Tinotify", cuerpo, datos, privado)
                 if resultado == "ok":
                     enviados += 1
                 elif resultado == "token_invalido":
@@ -212,7 +214,7 @@ class ServicioMonitor:
             raise
         self._guardar_expedientes(plan, metadatos)
         if aviso:
-            estado_push = self._notificar_push(plan)
+            estado_push = self._notificar_push(plan, metadatos)
             try:
                 self._almacen.fijar_canal_aviso(aviso, "push", estado_push)
             except AlmacenNoDisponible:
@@ -229,17 +231,42 @@ def _plural(n, uno, varios):
     return f"{n} {uno if n == 1 else varios}"
 
 
-def _texto_push(plan):
-    """Texto genérico con conteos y la pestaña a abrir al tocar la notificación."""
+def _lista_radicados(numeros):
+    numeros = [str(n) for n in numeros]
+    return numeros[0] if len(numeros) == 1 else ", ".join(numeros[:-1]) + " y " + numeros[-1]
+
+
+def _texto_push(plan, metadatos=None):
+    """(texto, pestaña, expediente). Con `metadatos` el texto nombra los radicados (hasta tres); sin ellos, solo conteos.
+
+    `expediente` es el identificador opaco del único expediente afectado (la app lo abre directamente al tocar el aviso)."""
+    cambios = list(getattr(plan, "cambios", ()) or ())
+    if metadatos and cambios:
+        con_novedades = [(metadatos[c.caso_ref][0], c.novedades, c.caso_ref) for c in cambios
+                         if c.accion == "novedades" and c.caso_ref in metadatos]
+        nuevos = [(metadatos[c.caso_ref][0], c.caso_ref) for c in cambios
+                  if c.accion == "nuevo" and not plan.primera_ejecucion and c.caso_ref in metadatos]
+        partes = []
+        if con_novedades:
+            total = sum(n for _, n, _ in con_novedades)
+            donde = (f"el radicado {con_novedades[0][0]}" if len(con_novedades) == 1 else
+                     f"los radicados {_lista_radicados([x[0] for x in con_novedades])}" if len(con_novedades) <= 3 else
+                     f"{len(con_novedades)} expedientes")
+            partes.append(f"{_plural(total, 'actuación nueva', 'actuaciones nuevas')} en {donde}")
+        if nuevos:
+            partes.append(f"Expediente nuevo: {nuevos[0][0]}" if len(nuevos) == 1 else f"{len(nuevos)} expedientes nuevos")
+        if partes:
+            unico = (con_novedades[0][2] if len(con_novedades) == 1 and not nuevos else nuevos[0][1] if len(nuevos) == 1 and not con_novedades else None)
+            return " · ".join(partes), "casos", unico
     if plan.novedades:
         texto = f"{_plural(plan.novedades, 'actuación nueva', 'actuaciones nuevas')} en {_plural(plan.expedientes_con_novedades, 'expediente', 'expedientes')}"
         if plan.expedientes_nuevos:
             texto += f" y {_plural(plan.expedientes_nuevos, 'expediente nuevo', 'expedientes nuevos')}"
-        return texto, "casos"
+        return texto, "casos", None
     if plan.expedientes_nuevos:
         return ("Apareció un expediente nuevo en tu cuenta" if plan.expedientes_nuevos == 1
-                else f"Aparecieron {plan.expedientes_nuevos} expedientes nuevos en tu cuenta"), "casos"
-    return "Una lectura necesita tu revisión en SIGAC", "actividad"
+                else f"Aparecieron {plan.expedientes_nuevos} expedientes nuevos en tu cuenta"), "casos", None
+    return "Una lectura necesita tu revisión en SIGAC", "actividad", None
 
 
 def _actuacion_json(a):
@@ -275,4 +302,15 @@ class ServiciosMonitor:
                 correo = self.resolver_correo(a["usuario"])
                 if correo:
                     a["destino"] = correo
+        # Detalle para el correo: los expedientes con novedades sin ver de cada dueño, en su aviso MÁS RECIENTE (así no se repite la lista).
+        ultimos = {}
+        for a in avisos:
+            ultimos[a.get("usuario")] = a
+        for dueno, a in ultimos.items():
+            try:
+                a["expedientes"] = [{"numero": x["numero"], "cliente": x["cliente"], "estado": x["estado"],
+                                     "novedades": x["novedades_no_vistas"], "nuevo": x["nuevo"]}
+                                    for x in self.para(dueno).expedientes() if x["novedades_no_vistas"] or x["nuevo"]][:20]
+            except Exception:  # noqa: BLE001 - el detalle es opcional: sin él el correo sale con conteos
+                pass
         return avisos
