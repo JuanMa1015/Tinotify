@@ -1,22 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Linking, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, BackHandler, Image, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Acceso from './Acceso';
+import Ajustes, { type SeccionAjustes } from './Ajustes';
 import { CambiarClave, EliminarCuenta } from './AuthPantallas';
-import { esTokenDeUsuario } from './cuentas';
+import { URL_SIGAC, esTokenDeUsuario } from './cuentas';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, crearInvitacion, enviarPrueba, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, olvidarCredenciales, type Actuacion, type Expediente } from './api';
-import { biometriaDisponible } from './almacen';
-import { activarPush, desactivarPush, pushActivo, type Pestana } from './notificaciones';
+import { ErrorApi, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, type Actuacion, type Expediente } from './api';
+import { type Pestana } from './notificaciones';
 import {
   canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
-import { colores, espacio } from './tema';
+import { colores, espacio, radios } from './tema';
 
 type Props = {
   token: string; biometria: boolean; version: string;
   onBiometria: (activa: boolean) => Promise<void>; onSalir: () => Promise<void>;
-  destino?: Pestana | null; onDestinoAtendido?: () => void;
+  destino?: Pestana | null; onDestinoAtendido?: () => void; correo?: string;
 };
 
 const saludo = () => {
@@ -25,7 +25,7 @@ const saludo = () => {
 };
 const mensajeDe = (err: unknown, otro = 'No se completó la operación.') => (err instanceof ErrorApi ? err.message : otro);
 
-export default function Principal({ token, biometria, version, onBiometria, onSalir, destino, onDestinoAtendido }: Props) {
+export default function Principal({ token, correo, biometria, version, onBiometria, onSalir, destino, onDestinoAtendido }: Props) {
   const [pestana, setPestana] = useState('inicio');
   const [estado, setEstado] = useState<EstadoMonitor>();
   const [ejecuciones, setEjecuciones] = useState<Ejecucion[]>();
@@ -35,6 +35,7 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
   const [reconectando, setReconectando] = useState(false);
   const [abierto, setAbierto] = useState<Expediente | null>(null);
   const [cuenta, setCuenta] = useState<'cambiar' | 'eliminar' | null>(null);
+  const [seccionAjustes, setSeccionAjustes] = useState<SeccionAjustes | null>(null);
   const usuario = esTokenDeUsuario(token);
 
   useEffect(() => { if (destino) { setPestana(destino); onDestinoAtendido?.(); void cargar(); } }, [destino]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -53,6 +54,18 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
 
   useEffect(() => { void cargar(); }, [cargar]);
 
+  useEffect(() => {  // el botón «atrás» de Android sube un nivel; solo cierra la app desde Inicio
+    const escucha = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (reconectando) { setReconectando(false); return true; }
+      if (cuenta) { setCuenta(null); return true; }
+      if (abierto) { setAbierto(null); return true; }
+      if (pestana === 'ajustes' && seccionAjustes) { setSeccionAjustes(null); return true; }
+      if (pestana !== 'inicio') { setPestana('inicio'); return true; }
+      return false;
+    });
+    return () => escucha.remove();
+  }, [reconectando, cuenta, abierto, pestana, seccionAjustes]);
+
   if (reconectando) {
     return <Acceso tokenFijo={token} onCancelar={() => setReconectando(false)} onListo={async () => { setReconectando(false); await cargar(); }} />;
   }
@@ -68,8 +81,9 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
       {pestana === 'inicio' && <Inicio estado={estado} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
-      {pestana === 'ajustes' && <Ajustes biometria={biometria} version={version} onBiometria={onBiometria} onSalir={onSalir} token={token}
-        onError={setError} onReconectar={() => setReconectando(true)} usuario={usuario} onCuenta={setCuenta} />}
+      {pestana === 'ajustes' && <Ajustes token={token} usuario={usuario} correo={correo} estado={estado} biometria={biometria} version={version}
+        onBiometria={onBiometria} onSalir={onSalir} onReconectar={() => setReconectando(true)} onCuenta={setCuenta}
+        seccion={seccionAjustes} onSeccion={setSeccionAjustes} />}
     </ScrollView>
     <BarraInferior activa={pestana} onElegir={setPestana} />
   </View>;
@@ -190,6 +204,21 @@ function Actividad({ ejecuciones }: { ejecuciones?: Ejecucion[] }) {
   </>;
 }
 
+function Anexo({ anexo }: { anexo: Actuacion['anexos'][number] }) {
+  const disponible = anexo.con_enlace === true;
+  return <View style={[s.anexo, disponible ? s.anexoActivo : s.anexoInactivo]}>
+    <Ionicons name={disponible ? 'document-attach' : 'document-outline'} size={22} color={disponible ? colores.marino : colores.textoSuave} />
+    <View style={{ flex: 1 }}>
+      <Text style={s.fuerteChico}>{anexo.descripcion || 'Anexo'}</Text>
+      {anexo.archivo !== '' && <Text style={s.pequeno}>{anexo.archivo}</Text>}
+      <Text style={[s.pequeno, { color: disponible ? '#3F7D1A' : colores.textoSuave, fontWeight: '600' }]}>
+        {disponible ? 'Archivo disponible en SIGAC' : 'Sin archivo descargable'}</Text>
+    </View>
+    {disponible && <Pressable accessibilityRole="button" accessibilityLabel="Abrir SIGAC para descargar el archivo" onPress={() => { void Linking.openURL(URL_SIGAC); }} style={s.abrirSigac}>
+      <Text style={s.abrirSigacTxt}>Abrir SIGAC</Text></Pressable>}
+  </View>;
+}
+
 function Sentido({ origen, destino }: { origen: string; destino: string }) {
   const tipo = tipoDireccion(origen, destino);
   const fondo = tipo === 'estudiante_asesor' ? colores.azulChip : tipo === 'asesor_estudiante' ? colores.limaSuave : colores.superficie;
@@ -229,7 +258,14 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
       <Pressable accessibilityRole="button" accessibilityLabel="Volver a expedientes" onPress={onVolver} style={s.volver}>
         <Ionicons name="chevron-back" size={22} color={colores.marino} /><Text style={s.fuerte}>Expedientes</Text>
       </Pressable>
-      <Titulo texto={`Radicado ${expediente.numero}`} subtitulo={`${expediente.cliente} · ${expediente.estado}`} />
+      <View style={s.cabecera}>
+        <Text style={s.radicado}>RADICADO {expediente.numero}</Text>
+        <Text accessibilityRole="header" style={s.clienteGrande}>{expediente.cliente}</Text>
+        <View style={s.chips}>
+          <Etiqueta texto={expediente.estado} tono="azul" />
+          {actuaciones && <Etiqueta texto={`${actuaciones.length} ${actuaciones.length === 1 ? 'actuación' : 'actuaciones'}`} tono="azul" />}
+        </View>
+      </View>
       {error !== '' && <><Aviso texto={error} /><Boton texto="Reintentar" secundario icono="refresh-outline" onPress={() => setIntento(n => n + 1)} /></>}
       {error === '' && actuaciones === undefined && <>
         <Text style={s.pequeno}>Leyendo SIGAC… puede tardar hasta un minuto.</Text>
@@ -242,113 +278,13 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
           {(a.origen || a.destino) && <Sentido origen={a.origen} destino={a.destino} />}
           {a.remitente !== '' && <Text style={s.pequeno}>Remitente: {a.remitente}</Text>}
           <Descripcion texto={a.descripcion} />
-          {a.anexos.length > 0 && <View style={{ marginTop: 8 }}>
+          {a.anexos.length > 0 && <View style={{ marginTop: 10, gap: 8 }}>
             <Text style={s.pequeno}>Anexos ({a.anexos.length})</Text>
-            {a.anexos.map((x, j) => <Text key={j} style={s.cuerpo}>• {x.descripcion}{x.archivo ? ` — ${x.archivo}` : x.sin_enlace ? ' (sin archivo descargable)' : ''}</Text>)}
+            {a.anexos.map((x, j) => <Anexo key={j} anexo={x} />)}
           </View>}
         </Tarjeta>))}
       <Text style={s.pequeno}>Lectura en vivo desde SIGAC a través de tu cuenta. Tinotify no guarda el contenido de las actuaciones.</Text>
     </ScrollView>
-  </View>;
-}
-
-type AjustesProps = Pick<Props, 'biometria' | 'version' | 'onBiometria' | 'onSalir'> & { token: string; onError: (m: string) => void; onReconectar: () => void; usuario: boolean; onCuenta: (c: 'cambiar' | 'eliminar') => void };
-
-function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onReconectar, usuario, onCuenta }: AjustesProps) {
-  const [hayBiometria, setHayBiometria] = useState(false);
-  const [push, setPush] = useState(false);
-  useEffect(() => { void biometriaDisponible().then(setHayBiometria); void pushActivo().then(setPush); }, []);
-
-  async function cambiarPush(activar: boolean) {
-    try {
-      if (activar) {
-        if ((await activarPush(token)) === 'permiso_denegado') { onError('Permite las notificaciones en los ajustes de Android.'); return; }
-      } else await desactivarPush(token);
-      setPush(activar); onError('');
-    } catch (err) { onError(mensajeDe(err, 'No se pudieron cambiar las notificaciones.')); }
-  }
-
-  async function probarPush() {
-    try {
-      const r = await enviarPrueba(token);
-      onError(r.enviados > 0 ? '' : 'No hay ningún teléfono registrado. Activa las notificaciones e inténtalo de nuevo.');
-      if (r.enviados > 0) Alert.alert('Notificación enviada', 'Debería llegar en unos segundos. Tócala para comprobar que abre la aplicación.');
-    } catch (err) { onError(mensajeDe(err, 'No se pudo enviar la notificación de prueba.')); }
-  }
-
-  async function invitar() {
-    try {
-      const r = await crearInvitacion(token);
-      await Share.share({ message: `Código de invitación de Tinotify (vale ${r.vigencia_dias} días y un solo uso): ${r.codigo}` });
-    } catch (err) { onError(mensajeDe(err, 'No se pudo crear la invitación.')); }
-  }
-
-  function confirmarOlvidar() {
-    Alert.alert('Olvidar mis credenciales', 'Se borran del servidor tu usuario y clave de SIGAC y tu estado de seguimiento. Tinotify dejará de revisar tu cuenta hasta que la conectes de nuevo.', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Borrar', style: 'destructive', onPress: () => { olvidarCredenciales(token).then(onSalir, err => onError(mensajeDe(err))); } },
-    ]);
-  }
-
-  return <>
-    <Titulo texto="Ajustes" />
-    <Seccion texto="Cuenta de SIGAC" />
-    <Boton texto="Actualizar mi clave de SIGAC" secundario icono="key-outline" onPress={onReconectar} />
-    <Texto>Úsalo si cambiaste tu clave en SIGAC. Mientras no la actualices, las revisiones fallarán.</Texto>
-    <Boton texto="Olvidar mis credenciales" secundario icono="trash-outline" onPress={confirmarOlvidar} />
-    <Texto>Borra del servidor tus datos de acceso y el estado de seguimiento.</Texto>
-
-    {usuario ? <>
-      <Seccion texto="Cuenta de Tinotify" />
-      <Boton texto="Cambiar contraseña" secundario icono="key-outline" onPress={() => onCuenta('cambiar')} />
-      <View style={{ height: espacio.m }} />
-      <Boton texto="Eliminar mi cuenta" secundario icono="trash-outline" onPress={() => onCuenta('eliminar')} />
-      <Texto>Elimina tu cuenta y todos tus datos del servidor. No se puede deshacer.</Texto>
-    </> : <>
-      <Seccion texto="Invitaciones" />
-      <Boton texto="Invitar a una persona" secundario icono="person-add-outline" onPress={() => { void invitar(); }} />
-      <Texto>Genera un código de un solo uso, válido por 7 días, y lo compartes tú.</Texto>
-    </>}
-
-    <Seccion texto="Avisos" />
-    <Tarjeta>
-      <Fila titulo="Notificaciones en este teléfono" detalle="Un aviso cuando haya actuaciones nuevas o aparezca un expediente nuevo." valor={push} onCambio={cambiarPush} />
-    </Tarjeta>
-
-    <Boton texto="Enviar notificación de prueba" secundario icono="paper-plane-outline" onPress={() => { void probarPush(); }} />
-    <Texto>Comprueba que este teléfono recibe los avisos. No modifica tus expedientes.</Texto>
-
-    <Seccion texto="Seguridad" />
-    <Tarjeta>
-      <Fila titulo="Desbloqueo con huella o rostro" detalle={hayBiometria ? 'Se pide al abrir la aplicación.' : 'Configura una huella o un rostro en el teléfono para activarlo.'}
-        valor={biometria} desactivado={!hayBiometria} onCambio={onBiometria} />
-    </Tarjeta>
-    <Boton texto="Cerrar sesión en este teléfono" secundario icono="log-out-outline" onPress={() => { void onSalir(); }} />
-
-    <Seccion texto="Privacidad" />
-    <Tarjeta>
-      <Text style={s.cuerpo}>Tu usuario y clave de SIGAC se guardan cifrados en el servidor y nunca en este teléfono. No se conserva el contenido de tus expedientes: solo resúmenes cifrados para detectar cambios y conteos. Los avisos no incluyen datos de los casos.</Text>
-      <Text style={s.enlace} accessibilityRole="link" onPress={() => { void Linking.openURL('https://github.com/JuanMa1015/Tinotify/blob/main/docs/legal/politica-tratamiento-datos.md'); }}>Política de tratamiento de datos</Text>
-    </Tarjeta>
-
-    <Seccion texto="Acerca de" />
-    <Tarjeta>
-      <Text style={s.fuerte}>Tinotify {version}</Text>
-      <Text style={s.cuerpo}>Tinotify no está afiliado a SIGAC. Los avisos son una ayuda: confirma siempre la información en el sistema oficial.</Text>
-    </Tarjeta>
-  </>;
-}
-
-const Seccion = ({ texto }: { texto: string }) => <Text accessibilityRole="header" style={s.seccion}>{texto}</Text>;
-const Texto = ({ children }: { children: string }) => <Text style={[s.pequeno, { marginBottom: espacio.m }]}>{children}</Text>;
-
-function Fila({ titulo, detalle, valor, onCambio, desactivado }: { titulo: string; detalle: string; valor: boolean; onCambio: (v: boolean) => Promise<void> | void; desactivado?: boolean }) {
-  return <View style={s.fila}>
-    <View style={{ flex: 1 }}>
-      <Text style={s.fuerte}>{titulo}</Text>
-      <Text style={s.cuerpo}>{detalle}</Text>
-    </View>
-    <Switch value={valor} disabled={desactivado} onValueChange={v => { void onCambio(v); }} accessibilityLabel={titulo} trackColor={{ true: colores.marino }} thumbColor={colores.blanco} />
   </View>;
 }
 
@@ -366,6 +302,15 @@ const s = StyleSheet.create({
   pequeno: { fontSize: 13, color: colores.textoSuave, marginTop: 4 }, enlace: { fontSize: 15, color: colores.marinoSuave, fontWeight: '600', marginTop: 10, textDecorationLine: 'underline' },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   volver: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
+  cabecera: { marginBottom: espacio.l },
+  radicado: { fontSize: 13, fontWeight: '700', color: colores.textoSuave, letterSpacing: 0.8 },
+  clienteGrande: { fontSize: 26, fontWeight: '700', color: colores.texto, lineHeight: 32, marginTop: 4 },
+  fuerteChico: { fontSize: 15, fontWeight: '700', color: colores.texto },
+  anexo: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: radios.chico, borderWidth: 1 },
+  anexoActivo: { backgroundColor: colores.limaSuave, borderColor: '#9DC356' },
+  anexoInactivo: { backgroundColor: colores.superficie, borderColor: colores.borde },
+  abrirSigac: { backgroundColor: colores.marino, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radios.pildora },
+  abrirSigacTxt: { color: colores.blanco, fontSize: 13, fontWeight: '700' },
   sentido: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, marginVertical: 6 },
   sentidoTxt: { fontSize: 13, fontWeight: '700', color: colores.marino, textTransform: 'uppercase', letterSpacing: 0.4 },
   etiquetaFila: { fontSize: 13, fontWeight: '700', color: colores.marinoSuave, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 },

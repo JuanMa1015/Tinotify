@@ -8,7 +8,7 @@ import { Bienvenida, Login, Registro } from './src/AuthPantallas';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
 import { cerrarSesionEnServidor, obtenerEstado } from './src/api';
-import { biometriaActiva, borrarToken, desbloquear, fijarBiometria, guardarToken, leerToken } from './src/almacen';
+import { biometriaActiva, borrarCorreo, borrarToken, desbloquear, fijarBiometria, guardarCorreo, guardarToken, leerCorreo, leerToken } from './src/almacen';
 import { esTokenDeUsuario } from './src/cuentas';
 import { pestanaDeNotificacion, type Pestana } from './src/notificaciones';
 import { colores } from './src/tema';
@@ -20,6 +20,7 @@ export default function App() {
   const [token, setToken] = useState<string>();
   const [biometria, setBiometria] = useState(false);
   const [destino, setDestino] = useState<Pestana | null>(null);
+  const [correo, setCorreo] = useState<string>();
   const version = Constants.expoConfig?.version ?? '0.1.0';
 
   const intentarDesbloqueo = useCallback(async () => { if (await desbloquear()) setFase('principal'); }, []);
@@ -29,6 +30,7 @@ export default function App() {
       const guardado = await leerToken();
       const bio = await biometriaActiva();
       setBiometria(bio);
+      setCorreo((await leerCorreo()) ?? undefined);
       if (!guardado) { setFase('bienvenida'); return; }
       setToken(guardado);
       if (bio) { setFase('bloqueada'); await intentarDesbloqueo(); } else setFase('principal');
@@ -43,8 +45,9 @@ export default function App() {
   }, []);
 
   // Tras registrarse o iniciar sesión: si la cuenta aún no tiene SIGAC conectado, se pide conectarlo.
-  async function alAutenticar(nuevo: string, esRegistro: boolean) {
+  async function alAutenticar(nuevo: string, esRegistro: boolean, correoNuevo?: string) {
     await guardarToken(nuevo); setToken(nuevo);
+    if (correoNuevo) { await guardarCorreo(correoNuevo); setCorreo(correoNuevo); }
     if (esRegistro) { setFase('conectar'); return; }
     try { setFase((await obtenerEstado(nuevo)).credenciales_guardadas ? 'principal' : 'conectar'); }
     catch { setFase('principal'); }
@@ -54,8 +57,8 @@ export default function App() {
   const salir = useCallback(async () => {
     const actual = token;
     if (actual && esTokenDeUsuario(actual)) { try { await cerrarSesionEnServidor(actual); } catch { /* la sesión caduca sola */ } }
-    await borrarToken(); await fijarBiometria(false);
-    setToken(undefined); setBiometria(false); setFase('bienvenida');
+    await borrarToken(); await borrarCorreo(); await fijarBiometria(false);
+    setToken(undefined); setCorreo(undefined); setBiometria(false); setFase('bienvenida');
   }, [token]);
 
   async function cambiarBiometria(activa: boolean) {
@@ -72,10 +75,10 @@ export default function App() {
       <Boton texto="Desbloquear" icono="finger-print" onPress={() => { void intentarDesbloqueo(); }} />
     </View>}
     {fase === 'bienvenida' && <Bienvenida onLogin={() => setFase('login')} onRegistro={() => setFase('registro')} onPropietario={() => setFase('propietario')} />}
-    {fase === 'login' && <Login onListo={(t) => alAutenticar(t, false)} onVolver={() => setFase('bienvenida')} />}
-    {fase === 'registro' && <Registro onListo={(t) => alAutenticar(t, true)} onVolver={() => setFase('bienvenida')} />}
+    {fase === 'login' && <Login onListo={(t, c) => alAutenticar(t, false, c)} onVolver={() => setFase('bienvenida')} />}
+    {fase === 'registro' && <Registro onListo={(t, c) => alAutenticar(t, true, c)} onVolver={() => setFase('bienvenida')} />}
     {fase === 'propietario' && <Acceso onListo={alConectarPropietario} onCancelar={() => setFase('bienvenida')} />}
     {fase === 'conectar' && token && <Acceso tokenFijo={token} titulo="Conecta tu cuenta de SIGAC" onListo={async () => setFase('principal')} onCancelar={() => setFase('principal')} />}
-    {fase === 'principal' && token && <Principal token={token} biometria={biometria} version={version} onBiometria={cambiarBiometria} onSalir={salir} destino={destino} onDestinoAtendido={() => setDestino(null)} />}
+    {fase === 'principal' && token && <Principal token={token} correo={correo} biometria={biometria} version={version} onBiometria={cambiarBiometria} onSalir={salir} destino={destino} onDestinoAtendido={() => setDestino(null)} />}
   </View>;
 }

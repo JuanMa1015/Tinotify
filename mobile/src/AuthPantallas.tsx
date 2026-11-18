@@ -22,6 +22,7 @@ export function Bienvenida({ onLogin, onRegistro, onPropietario }: { onLogin: ()
     <Boton texto="Iniciar sesión" icono="log-in-outline" onPress={onLogin} />
     <View style={{ height: espacio.m }} />
     <Boton texto="Crear cuenta con invitación" secundario icono="mail-open-outline" onPress={onRegistro} />
+    <Text style={s.nota}>Entras con el correo y la contraseña de tu cuenta de Tinotify. Tus credenciales de SIGAC se piden una sola vez, después de entrar.</Text>
     <Text accessibilityRole="button" style={s.enlace} onPress={onPropietario}>Acceso del propietario</Text>
     <Text style={s.nota}>El registro es solo por invitación. Pídele el código a quien administra Tinotify.</Text>
   </Marco>;
@@ -47,6 +48,7 @@ export function Login({ onListo, onVolver }: { onListo: (token: string, correo: 
 
   return <Marco>
     <Text accessibilityRole="header" style={s.titulo}>Iniciar sesión</Text>
+    <Text style={s.nota}>Usa el correo y la contraseña de tu cuenta de Tinotify, los que creaste al registrarte. No son los de SIGAC: esos se piden una sola vez, después de entrar.</Text>
     <Tarjeta>
       <Campo icono="mail-outline" etiqueta="Correo" valor={correo} onCambio={setCorreo} teclado="email-address" />
       <Campo icono="lock-closed-outline" etiqueta="Contraseña" valor={clave} onCambio={setClave} secreto={!ver} verContrasena={() => setVer(!ver)} visible={ver} />

@@ -23,3 +23,9 @@ export async function desbloquear(): Promise<boolean> {
   const r = await LocalAuthentication.authenticateAsync({ promptMessage: 'Abrir Tinotify', cancelLabel: 'Cancelar', disableDeviceFallback: false });
   return r.success;
 }
+
+// El correo se guarda solo para mostrarlo en Ajustes (el servidor ya lo conoce); nunca la contraseña.
+const CLAVE_CORREO = 'tinotify.correo.v1';
+export const leerCorreo = () => SecureStore.getItemAsync(CLAVE_CORREO);
+export const guardarCorreo = (correo: string) => SecureStore.setItemAsync(CLAVE_CORREO, correo);
+export const borrarCorreo = () => SecureStore.deleteItemAsync(CLAVE_CORREO);
