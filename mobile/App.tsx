@@ -4,13 +4,16 @@ import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import Acceso from './src/Acceso';
+import { Bienvenida, Login, Registro } from './src/AuthPantallas';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
+import { cerrarSesionEnServidor, obtenerEstado } from './src/api';
 import { biometriaActiva, borrarToken, desbloquear, fijarBiometria, guardarToken, leerToken } from './src/almacen';
+import { esTokenDeUsuario } from './src/cuentas';
 import { pestanaDeNotificacion, type Pestana } from './src/notificaciones';
 import { colores } from './src/tema';
 
-type Fase = 'cargando' | 'bloqueada' | 'acceso' | 'principal';
+type Fase = 'cargando' | 'bloqueada' | 'bienvenida' | 'login' | 'registro' | 'propietario' | 'conectar' | 'principal';
 
 export default function App() {
   const [fase, setFase] = useState<Fase>('cargando');
@@ -26,7 +29,7 @@ export default function App() {
       const guardado = await leerToken();
       const bio = await biometriaActiva();
       setBiometria(bio);
-      if (!guardado) { setFase('acceso'); return; }
+      if (!guardado) { setFase('bienvenida'); return; }
       setToken(guardado);
       if (bio) { setFase('bloqueada'); await intentarDesbloqueo(); } else setFase('principal');
     })();
@@ -39,8 +42,22 @@ export default function App() {
     return () => escucha.remove();
   }, []);
 
-  async function alConectar(nuevo: string) { await guardarToken(nuevo); setToken(nuevo); setFase('principal'); }
-  const salir = useCallback(async () => { await borrarToken(); await fijarBiometria(false); setToken(undefined); setBiometria(false); setFase('acceso'); }, []);
+  // Tras registrarse o iniciar sesión: si la cuenta aún no tiene SIGAC conectado, se pide conectarlo.
+  async function alAutenticar(nuevo: string, esRegistro: boolean) {
+    await guardarToken(nuevo); setToken(nuevo);
+    if (esRegistro) { setFase('conectar'); return; }
+    try { setFase((await obtenerEstado(nuevo)).credenciales_guardadas ? 'principal' : 'conectar'); }
+    catch { setFase('principal'); }
+  }
+  async function alConectarPropietario(nuevo: string) { await guardarToken(nuevo); setToken(nuevo); setFase('principal'); }
+
+  const salir = useCallback(async () => {
+    const actual = token;
+    if (actual && esTokenDeUsuario(actual)) { try { await cerrarSesionEnServidor(actual); } catch { /* la sesión caduca sola */ } }
+    await borrarToken(); await fijarBiometria(false);
+    setToken(undefined); setBiometria(false); setFase('bienvenida');
+  }, [token]);
+
   async function cambiarBiometria(activa: boolean) {
     if (activa && !(await desbloquear())) return;  // se confirma antes de activar
     await fijarBiometria(activa); setBiometria(activa);
@@ -54,7 +71,11 @@ export default function App() {
       <Text style={{ fontSize: 16, color: colores.textoSuave, textAlign: 'center' }}>Confirma tu identidad para continuar.</Text>
       <Boton texto="Desbloquear" icono="finger-print" onPress={() => { void intentarDesbloqueo(); }} />
     </View>}
-    {fase === 'acceso' && <Acceso onListo={alConectar} />}
+    {fase === 'bienvenida' && <Bienvenida onLogin={() => setFase('login')} onRegistro={() => setFase('registro')} onPropietario={() => setFase('propietario')} />}
+    {fase === 'login' && <Login onListo={(t) => alAutenticar(t, false)} onVolver={() => setFase('bienvenida')} />}
+    {fase === 'registro' && <Registro onListo={(t) => alAutenticar(t, true)} onVolver={() => setFase('bienvenida')} />}
+    {fase === 'propietario' && <Acceso onListo={alConectarPropietario} onCancelar={() => setFase('bienvenida')} />}
+    {fase === 'conectar' && token && <Acceso tokenFijo={token} titulo="Conecta tu cuenta de SIGAC" onListo={async () => setFase('principal')} onCancelar={() => setFase('principal')} />}
     {fase === 'principal' && token && <Principal token={token} biometria={biometria} version={version} onBiometria={cambiarBiometria} onSalir={salir} destino={destino} onDestinoAtendido={() => setDestino(null)} />}
   </View>;
 }

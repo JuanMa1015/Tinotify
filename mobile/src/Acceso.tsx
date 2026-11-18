@@ -1,13 +1,13 @@
 import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Aviso, Boton, Tarjeta } from './componentes';
+import { Aviso, Boton, Campo, Tarjeta } from './componentes';
 import { conectar, ErrorApi } from './api';
 import { colores, espacio, radios } from './tema';
 
 // Usuario y clave de SIGAC solo existen en el estado de esta pantalla mientras se escriben: se envían una vez al servidor
 // (cifrado en reposo allí) y se borran siempre, con éxito o con fallo.
-export default function Acceso({ onListo, tokenFijo, onCancelar }: { onListo: (token: string) => Promise<void>; tokenFijo?: string; onCancelar?: () => void }) {
+export default function Acceso({ onListo, tokenFijo, onCancelar, titulo }: { onListo: (token: string) => Promise<void>; tokenFijo?: string; onCancelar?: () => void; titulo?: string }) {
   const [codigo, setCodigo] = useState('');
   const [usuario, setUsuario] = useState('');
   const [clave, setClave] = useState('');
@@ -35,7 +35,7 @@ export default function Acceso({ onListo, tokenFijo, onCancelar }: { onListo: (t
         <Text style={s.lema}>Te avisamos cuando haya novedades en SIGAC</Text>
       </View>
       <Tarjeta>
-        <Text style={s.seccion}>{tokenFijo ? 'Actualiza tu clave de SIGAC' : 'Conecta tu cuenta'}</Text>
+        <Text style={s.seccion}>{titulo ?? (tokenFijo ? 'Actualiza tu clave de SIGAC' : 'Conecta tu cuenta')}</Text>
         {!tokenFijo && <Campo icono="key-outline" etiqueta="Código de acceso del servidor" valor={codigo} onCambio={setCodigo} secreto />}
         <Campo icono="person-outline" etiqueta="Usuario SIGAC" valor={usuario} onCambio={setUsuario} />
         <Campo icono="lock-closed-outline" etiqueta="Contraseña" valor={clave} onCambio={setClave} secreto={!ver}
@@ -54,18 +54,6 @@ export default function Acceso({ onListo, tokenFijo, onCancelar }: { onListo: (t
       <Image source={require('../assets/gato-asomado.png')} accessible={false} resizeMode="contain" style={s.asomado} />
     </ScrollView>
   </KeyboardAvoidingView>;
-}
-
-function Campo({ icono, etiqueta, valor, onCambio, secreto, derecha }: {
-  icono: keyof typeof Ionicons.glyphMap; etiqueta: string; valor: string; onCambio: (v: string) => void; secreto?: boolean; derecha?: React.ReactNode;
-}) {
-  return <View style={s.campo}>
-    <Ionicons name={icono} size={20} color={colores.textoSuave} />
-    <TextInput accessibilityLabel={etiqueta} placeholder={etiqueta} placeholderTextColor={colores.textoSuave} value={valor} onChangeText={onCambio}
-      secureTextEntry={secreto} autoCapitalize="none" autoCorrect={false} autoComplete="off" importantForAutofill="no" spellCheck={false}
-      contextMenuHidden={secreto} style={s.entrada} />
-    {derecha}
-  </View>;
 }
 
 const s = StyleSheet.create({

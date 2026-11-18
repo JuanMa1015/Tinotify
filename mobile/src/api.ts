@@ -1,8 +1,9 @@
 import { baseURL } from './config';
+import { CONSENTIMIENTO, esTokenDeUsuario } from './cuentas';
 import type { Ejecucion, EstadoMonitor } from './revisiones';
 
 export class ErrorApi extends Error {
-  constructor(mensaje: string, readonly estado: number | null) { super(mensaje); }
+  constructor(mensaje: string, readonly estado: number | null, readonly detalle?: string) { super(mensaje); }
 }
 
 const MENSAJES: Record<number, string> = {
@@ -16,17 +17,21 @@ const MENSAJES: Record<number, string> = {
   503: 'El servicio no está disponible. Inténtalo en un momento.',
 };
 
-async function solicitar<T>(ruta: string, token: string, opciones: { metodo?: string; cuerpo?: unknown; limiteMs?: number } = {}): Promise<T> {
+async function solicitar<T>(ruta: string, token: string | undefined, opciones: { metodo?: string; cuerpo?: unknown; limiteMs?: number } = {}): Promise<T> {
   const cancelar = new AbortController();
   const temporizador = setTimeout(() => cancelar.abort(), opciones.limiteMs ?? 30000);
   try {
     const r = await fetch(`${baseURL}${ruta}`, {
       method: opciones.metodo ?? (opciones.cuerpo === undefined ? 'GET' : 'POST'),
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: opciones.cuerpo === undefined ? undefined : JSON.stringify(opciones.cuerpo),
       signal: cancelar.signal,
     });
-    if (!r.ok) throw new ErrorApi(MENSAJES[r.status] ?? 'No se completó la operación.', r.status);
+    if (!r.ok) {
+      let detalle: string | undefined;
+      try { const j = await r.json() as { detail?: unknown }; if (typeof j.detail === 'string') detalle = j.detail; } catch { /* sin cuerpo */ }
+      throw new ErrorApi(MENSAJES[r.status] ?? 'No se completó la operación.', r.status, detalle);
+    }
     return (r.status === 204 ? undefined : await r.json()) as T;
   } catch (e) {
     if (e instanceof ErrorApi) throw e;
@@ -36,6 +41,10 @@ async function solicitar<T>(ruta: string, token: string, opciones: { metodo?: st
 
 // Login: el servidor (Render) arranca en frío y lee SIGAC, puede tardar 2-3 minutos.
 export async function conectar(token: string, usuario: string, clave: string): Promise<void> {
+  if (esTokenDeUsuario(token)) {  // cuenta de usuario: el servidor comprueba con SIGAC y guarda las credenciales cifradas
+    await solicitar('/real/conectar', token, { cuerpo: { usuario, clave }, limiteMs: 200000 });
+    return;
+  }
   await solicitar('/real/sesion', token, { cuerpo: { usuario, clave, recordar: true }, limiteMs: 200000 });
   try { await solicitar('/real/sesion', token, { metodo: 'DELETE' }); } catch { /* la sesión temporal expira sola */ }
 }
@@ -60,3 +69,14 @@ export type Actuacion = {
 // Lee SIGAC en ese momento a través del servidor (inicia sesión con tus credenciales guardadas): puede tardar hasta un minuto.
 export const obtenerActuaciones = (token: string, id: string) =>
   solicitar<{ actuaciones: Actuacion[] }>(`/real/expedientes/${id}/actuaciones`, token, { limiteMs: 150000 });
+
+// --- Cuentas de usuario (registro por invitación) ---
+export type SesionNueva = { token: string; usuario: string };
+export const registrar = (d: { invitacion: string; correo: string; clave: string }) =>
+  solicitar<SesionNueva>('/auth/registro', undefined, { cuerpo: { ...d, consentimiento: CONSENTIMIENTO, dispositivo: 'Android' }, limiteMs: 60000 });
+export const iniciarSesion = (correo: string, clave: string) =>
+  solicitar<SesionNueva>('/auth/login', undefined, { cuerpo: { correo, clave, dispositivo: 'Android' }, limiteMs: 60000 });
+export const cerrarSesionEnServidor = (token: string) => solicitar<{ cerrada: boolean }>('/auth/logout', token, { cuerpo: {} });
+export const cambiarClave = (token: string, actual: string, nueva: string) => solicitar<{ cambiada: boolean }>('/auth/cambiar-clave', token, { cuerpo: { actual, nueva } });
+export const eliminarCuenta = (token: string, clave: string) => solicitar<{ borrada: boolean }>('/auth/cuenta', token, { metodo: 'DELETE', cuerpo: { clave } });
+export const crearInvitacion = (token: string) => solicitar<{ codigo: string; vigencia_dias: number }>('/auth/invitaciones', token, { cuerpo: {} });
