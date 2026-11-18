@@ -20,7 +20,7 @@ concurrency:
 jobs:
   ciclo:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45  # una revision de ~3 min por usuario
     steps:
       - uses: actions/checkout@v4
         with:

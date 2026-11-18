@@ -20,21 +20,27 @@ class AlmacenCuentasPg(AlmacenPg):
         with self._tx() as con:
             con.execute("INSERT INTO tinotify_real.invitaciones (codigo_hash, expira_en) VALUES (%s, %s)", (codigo_hash, expira_en))
 
-    def registrar_usuario(self, invitacion_hash, correo_ref, pass_hash, consentimiento_version, ahora):
+    def registrar_usuario(self, invitacion_hash, correo_ref, pass_hash, consentimiento_version, ahora, correo=None):
         with self._tx() as con:
             inv = con.execute("SELECT 1 FROM tinotify_real.invitaciones WHERE codigo_hash = %s AND usado_en IS NULL AND expira_en > %s "
                               "FOR UPDATE", (invitacion_hash, ahora)).fetchone()
             if inv is None:
                 raise RegistroNoValido
             fila = con.execute(
-                "INSERT INTO tinotify_real.usuarios (correo_ref, pass_hash, consentimiento_version, consentimiento_en) "
-                "VALUES (%s, %s, %s, %s) ON CONFLICT (correo_ref) DO NOTHING RETURNING id",
-                (correo_ref, pass_hash, consentimiento_version, ahora)).fetchone()
+                "INSERT INTO tinotify_real.usuarios (correo_ref, pass_hash, consentimiento_version, consentimiento_en, correo_nonce, correo_cifrado) "
+                "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (correo_ref) DO NOTHING RETURNING id",
+                (correo_ref, pass_hash, consentimiento_version, ahora, correo[0] if correo else None, correo[1] if correo else None)).fetchone()
             if fila is None:
                 raise RegistroNoValido
             con.execute("UPDATE tinotify_real.invitaciones SET usado_por = %s, usado_en = %s WHERE codigo_hash = %s",
                         (fila[0], ahora, invitacion_hash))
             return str(fila[0])
+
+    def correo_cifrado_de(self, usuario_id):
+        with self._tx() as con:
+            fila = con.execute("SELECT correo_nonce, correo_cifrado FROM tinotify_real.usuarios WHERE id = %s::uuid AND activo",
+                               (usuario_id,)).fetchone()
+        return None if fila is None or fila[0] is None else (bytes(fila[0]), bytes(fila[1]))
 
     def usuario_por_correo_ref(self, ref):
         with self._tx() as con:

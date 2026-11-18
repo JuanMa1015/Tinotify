@@ -92,3 +92,20 @@ def test_las_tres_tablas_tienen_rls_forzado_y_los_clientes_de_supabase_no_entran
                              (f"tinotify_real.{tabla}",)).fetchone() == (True, True)
         for rol in ("anon", "authenticated", "service_role"):
             assert admin.execute("SELECT has_table_privilege(%s, %s, 'SELECT,INSERT,UPDATE,DELETE')", (rol, f"tinotify_real.{tabla}")).fetchone()[0] is False
+
+
+def test_el_correo_de_aviso_se_guarda_cifrado_y_solo_se_lee_con_la_llave(mundo):
+    from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg
+    s, admin = mundo
+    a = s._a if hasattr(s, "_a") else None
+    assert isinstance(a, AlmacenCuentasPg)
+    con_llave = ServicioCuentas(a, b"k" * 32, n_scrypt=2**10, llave_correo=b"c" * 32)
+    _, usuario = con_llave.registrar("destino@ejemplo.com", CLAVE, con_llave.crear_invitacion(), "consentimiento-v1")
+    bruto = admin.execute("SELECT correo_nonce, correo_cifrado FROM tinotify_real.usuarios WHERE id = %s", (usuario.id,)).fetchone()
+    assert b"destino" not in bytes(bruto[1]) and b"ejemplo" not in bytes(bruto[1])
+    assert con_llave.correo_de(usuario.id) == "destino@ejemplo.com"
+    assert ServicioCuentas(a, b"k" * 32, llave_correo=b"z" * 32).correo_de(usuario.id) is None
+    _, sin = s.registrar("otra@ejemplo.com", CLAVE, s.crear_invitacion(), "consentimiento-v1")       # el servicio del fixture no guarda correo
+    assert admin.execute("SELECT correo_cifrado IS NULL FROM tinotify_real.usuarios WHERE id = %s", (sin.id,)).fetchone()[0] is True
+    with pytest.raises(Exception):
+        admin.execute("UPDATE tinotify_real.usuarios SET correo_nonce = '\\x00'::bytea WHERE id = %s", (sin.id,))   # nonce sin cifrado: lo impide la restricción

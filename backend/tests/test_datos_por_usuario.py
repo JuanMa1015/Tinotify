@@ -119,3 +119,20 @@ def test_conectar_con_credenciales_rechazadas_por_sigac_no_guarda_nada():
     r = m.c.post("/real/conectar", headers=cab, json={"usuario": "USUARIO_FICTICIO", "clave": "clave-mala-ficticia"})
     assert r.status_code >= 400 and "clave-mala-ficticia" not in r.text
     assert m.c.get("/real/monitor/estado", headers=cab).json()["credenciales_guardadas"] is False
+
+
+def test_el_aviso_de_un_usuario_lleva_su_correo_de_destino_y_el_del_propietario_no():
+    casos = casos_base()
+    m = Mundo(casos, cuentas=CuentasMemoria())
+    m.guardar_credenciales()
+    m.ejecutar()
+    uid, cab = nuevo_usuario(m, "destino@ejemplo.com")
+    conectar(m, cab)
+    ejecutar_usuario(m, uid)
+    primero = next(iter(casos))
+    casos[primero] = list(casos[primero]) + ["ACTUACION_POSTERIOR_FICTICIA"]
+    ejecutar_usuario(m, uid)
+    m.ejecutar()
+    avisos = {a["usuario"]: a for a in m.c.get("/real/monitor/avisos", headers=MON).json()["avisos"]}
+    assert avisos[uid].get("destino") == "destino@ejemplo.com"
+    assert "destino" not in avisos[None]

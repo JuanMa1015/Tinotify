@@ -68,3 +68,23 @@ def descifrar_expediente(llave, caso_ref, nonce, cifrado):
     except (InvalidTag, ValueError, KeyError, TypeError, UnicodeError):
         raise CifradoNoValido("descifrado") from None
     return numero, cliente, estado
+
+
+AAD_CORREO = b"tinotify-real|correo|v1"
+
+
+def cifrar_correo(llave, correo):
+    """Correo de aviso del usuario, cifrado (AES-256-GCM). La base solo guarda nonce y texto cifrado."""
+    if not isinstance(llave, (bytes, bytearray)) or len(llave) != 32 or not isinstance(correo, str) or not 3 <= len(correo) <= 254:
+        raise CifradoNoValido("datos")
+    nonce = os.urandom(12)
+    return nonce, AESGCM(bytes(llave)).encrypt(nonce, correo.encode("utf-8"), AAD_CORREO)
+
+
+def descifrar_correo(llave, nonce, cifrado):
+    if not isinstance(llave, (bytes, bytearray)) or len(llave) != 32:
+        raise CifradoNoValido("llave")
+    try:
+        return AESGCM(bytes(llave)).decrypt(bytes(nonce), bytes(cifrado), AAD_CORREO).decode("utf-8")
+    except (InvalidTag, ValueError, TypeError, UnicodeError):
+        raise CifradoNoValido("descifrado") from None

@@ -120,7 +120,9 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         if config.cuentas:
             from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg  # carga perezosa: solo si las cuentas están activas
             llave_cuentas = hashlib.sha256(b"tinotify-cuentas|" + config.monitor.clave_cifrado).digest()
-            servicio_cuentas = ServicioCuentas(almacen_cuentas or AlmacenCuentasPg(config.monitor.pg), llave_cuentas)
+            llave_correo = hashlib.sha256(b"tinotify-correo|" + config.monitor.clave_cifrado).digest()
+            servicio_cuentas = ServicioCuentas(almacen_cuentas or AlmacenCuentasPg(config.monitor.pg), llave_cuentas, llave_correo=llave_correo)
+            servicios.resolver_correo = servicio_cuentas.correo_de
     for biblioteca in ("httpx", "httpcore"):
         logging.getLogger(biblioteca).setLevel(logging.CRITICAL)  # sus mensajes incluyen URLs institucionales
 
