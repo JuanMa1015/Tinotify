@@ -133,12 +133,9 @@ class ServicioMonitor:
     def canal_aviso(self, aviso, canal, estado):
         return self._almacen.fijar_canal_aviso(aviso, canal, estado)
 
-    def historial_expediente(self, caso_ref):
-        """Actuaciones de UN expediente leídas de SIGAC en este momento (inicia sesión con las credenciales guardadas). No se guardan."""
-        antes = time.monotonic()
-        guardado = self._cache.get(caso_ref)
-        if guardado and antes - guardado[0] < CACHE_DETALLE_S:
-            return guardado[1]
+    def _con_sesion_sigac(self, caso_ref, accion):
+        """Descifra el número del expediente y las credenciales guardadas, inicia sesión en SIGAC y ejecuta `accion(cliente, usuario, clave,
+        tipo=, total_casos=, caso_login=, numero=)`. Las credenciales no sobreviven a la llamada."""
         fila = next((f for f in self._almacen.expedientes() if f[0] == caso_ref), None)
         if fila is None:
             raise ExpedienteNoEncontrado
@@ -152,10 +149,17 @@ class ServicioMonitor:
         usuario, clave, caso_login = descifrar_credenciales(self._llave, credenciales[1], credenciales[2])
         cfg = self._config
         try:
-            actuaciones = self._sesiones.con_cliente(lambda cliente: leer_un_expediente(
+            return self._sesiones.con_cliente(lambda cliente: accion(
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login, numero=numero))
         finally:
             del usuario, clave, caso_login
+
+    def historial_expediente(self, caso_ref):
+        """Actuaciones de UN expediente leídas de SIGAC en este momento (inicia sesión con las credenciales guardadas). No se guardan."""
+        guardado = self._cache.get(caso_ref)
+        if guardado and time.monotonic() - guardado[0] < CACHE_DETALLE_S:
+            return guardado[1]
+        actuaciones = self._con_sesion_sigac(caso_ref, leer_un_expediente)
         ordenadas = sorted(actuaciones, key=lambda a: a.fecha, reverse=True)
         datos = [_actuacion_json(a) for a in ordenadas]
         self._cache[caso_ref] = (time.monotonic(), datos)
@@ -174,23 +178,8 @@ class ServicioMonitor:
         if entrada is None:
             raise AnexoNoDisponible
         referencia, archivo = entrada
-        fila = next((f for f in self._almacen.expedientes() if f[0] == caso_ref), None)
-        if fila is None:
-            raise ExpedienteNoEncontrado
-        try:
-            numero, _, _ = descifrar_expediente(self._llave, caso_ref, fila[2], fila[3])
-        except CifradoNoValido:
-            raise ExpedienteNoEncontrado from None
-        credenciales = self._almacen.credenciales()
-        if credenciales is None:
-            raise SinCredenciales
-        usuario, clave, caso_login = descifrar_credenciales(self._llave, credenciales[1], credenciales[2])
-        cfg = self._config
-        try:
-            contenido, tipo, nombre = self._sesiones.con_cliente(lambda cliente: descargar_un_anexo(
-                cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login, numero=numero, referencia=referencia))
-        finally:
-            del usuario, clave, caso_login
+        contenido, tipo, nombre = self._con_sesion_sigac(caso_ref, lambda cliente, usuario, clave, **kw: descargar_un_anexo(
+            cliente, usuario, clave, referencia=referencia, **kw))
         return contenido, tipo, nombre or archivo or "anexo"
 
     def marcar_vistos(self, caso_ref=None):
