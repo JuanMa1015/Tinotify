@@ -21,6 +21,7 @@ from tinotify.parsers.diagnostico_historial import (
 
 
 BASE_URL = "https://sigac.udea.edu.co/sigac/"
+MAX_DESCARGA_BYTES = 25 * 1024 * 1024  # tope de un anexo descargado a través del servidor
 LISTADO = "casos.seleccionarCasos.con?motivo=ACTUAR_ESTUDIANTE"
 MAX_HTML_BYTES = 8 * 1024 * 1024
 
@@ -147,6 +148,51 @@ class SigacClient:
             self._invalidar()
             raise SigacSessionExpired("SIGAC volvió a la selección de rol.", codigo=CodigoHistorial.SESION_NO_CONFIRMADA)
         return html
+
+    def descargar_anexo(self, referencia: str):
+        """Descarga UN anexo con la sesión actual. Devuelve (contenido, tipo, nombre_sugerido).
+
+        Solo acepta `general.descargarAnexo.con?codigo=...` (la referencia validada por el parser). Nunca se acepta HTML: sería el
+        formulario de acceso o una página de error, no el archivo. Tamaño acotado; sin seguir redirecciones."""
+        try:
+            ruta = self._validar_ruta(referencia)
+        except ValueError:
+            raise SigacClientError("Referencia de anexo no admitida.", codigo=CodigoHistorial.ANEXO_REFERENCIA_INVALIDA) from None
+        partes = urlsplit(ruta)
+        if partes.path != "general.descargarAnexo.con" or not partes.query.startswith("codigo=") or len(ruta) > 400:
+            raise SigacClientError("Referencia de anexo no admitida.", codigo=CodigoHistorial.ANEXO_REFERENCIA_INVALIDA)
+        causa = None
+        try:
+            with self.http.stream("GET", ruta, follow_redirects=False) as respuesta:
+                if respuesta.status_code in (401, 403) or 300 <= respuesta.status_code < 400:
+                    self._invalidar()
+                    raise SigacSessionExpired("Sesión no confirmada o vencida.", codigo=CodigoHistorial.SESION_NO_CONFIRMADA)
+                if respuesta.status_code != 200:
+                    raise SigacClientError("Respuesta HTTP no válida; no se descargó.", codigo=CodigoHistorial.HTTP_INVALIDO)
+                tipo = respuesta.headers.get("content-type", "application/octet-stream").split(";", 1)[0].strip().lower()
+                if tipo in ("text/html", "application/xhtml+xml"):
+                    self._invalidar()
+                    raise SigacSessionExpired("SIGAC no devolvió el archivo.", codigo=CodigoHistorial.SESION_NO_CONFIRMADA)
+                partes_cuerpo, total = [], 0
+                for parte in respuesta.iter_bytes():
+                    total += len(parte)
+                    if total > MAX_DESCARGA_BYTES:
+                        raise SigacClientError("El archivo es demasiado grande.", codigo=CodigoHistorial.LIMITE_RESPUESTA)
+                    partes_cuerpo.append(parte)
+                cabecera = respuesta.headers.get("content-disposition", "")
+        except (httpx.HTTPError, UnicodeError) as error:
+            causa = type(error).__name__
+        if causa is not None:
+            fallo = SigacClientError("Error de comunicación; no se descargó el archivo.", codigo=CodigoHistorial.TRANSPORTE)
+            fallo.causa = causa
+            raise fallo
+        contenido = b"".join(partes_cuerpo)
+        if not contenido:
+            raise SigacClientError("El archivo llegó vacío.", codigo=CodigoHistorial.HTML_VACIO)
+        nombre = None
+        if "filename=" in cabecera:
+            nombre = cabecera.split("filename=", 1)[1].split(";", 1)[0].strip().strip('"')
+        return contenido, tipo, nombre
 
     def obtener_html(self, ruta: str) -> str:
         """Compatibilidad de bajo nivel; no demuestra autenticación por sí sola."""

@@ -8,7 +8,7 @@ import logging
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, SecretStr, StringConstraints
 from starlette.concurrency import run_in_threadpool
@@ -18,7 +18,7 @@ from tinotify.real_remoto.almacen import AlmacenIncompatible, AlmacenNoDisponibl
 from tinotify.real_remoto.cifrado import CifradoNoValido
 from tinotify.real_remoto.comun import Acceso
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
-from tinotify.real_remoto.servicio_monitor import ExpedienteNoEncontrado, SinCredenciales
+from tinotify.real_remoto.servicio_monitor import AnexoNoDisponible, ExpedienteNoEncontrado, SinCredenciales
 
 registro = logging.getLogger("tinotify.real_remoto")
 
@@ -82,6 +82,30 @@ def registrar_monitor(app: FastAPI, *, servicios, servicio_actual, config, prote
             raise http_desde_sigac(error) from None
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
+
+    @app.get("/real/expedientes/{caso}/actuaciones/{actuacion}/anexos/{anexo}")
+    async def descargar_anexo(servicio: Annotated[object, Depends(servicio_actual)], caso: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
+                              actuacion: Annotated[int, Path(ge=0, le=100000)], anexo: Annotated[int, Path(ge=0, le=1000)]):
+        """Entrega el archivo de un anexo, descargado de SIGAC en este momento con las credenciales guardadas. No se almacena."""
+        try:
+            contenido, tipo, nombre = await run_in_threadpool(servicio.descargar_anexo, caso, actuacion, anexo)
+        except (ExpedienteNoEncontrado, AnexoNoDisponible):
+            raise HTTPException(404, "Anexo no disponible; abre el expediente de nuevo") from None
+        except SinCredenciales:
+            raise HTTPException(412, "No hay credenciales guardadas") from None
+        except CifradoNoValido:
+            registro.error("cifrado_no_valido")
+            raise HTTPException(503, "Servicio no configurado") from None
+        except SesionOcupada:
+            raise HTTPException(409, "Ya hay un acceso en curso") from None
+        except DemasiadosIntentosLogin as error:
+            raise HTTPException(429, "Demasiados intentos de acceso; espera", headers={"Retry-After": str(error.espera_s)}) from None
+        except SigacClientError as error:
+            raise http_desde_sigac(error) from None
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+        seguro = "".join(c if c.isalnum() or c in " ._-()" else "_" for c in nombre)[:120] or "anexo"
+        return Response(contenido, media_type=tipo, headers={"Content-Disposition": f'attachment; filename="{seguro}"'})
 
     class Vistos(BaseModel):
         model_config = ConfigDict(extra="forbid")

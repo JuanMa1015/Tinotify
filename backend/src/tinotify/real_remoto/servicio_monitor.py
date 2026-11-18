@@ -10,7 +10,7 @@ from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.almacen import AlmacenNoDisponible
 from tinotify.real_remoto.cifrado import (
     CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, descifrar_credenciales, descifrar_expediente)
-from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, leer_expedientes, leer_un_expediente
+from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, descargar_un_anexo, leer_expedientes, leer_un_expediente
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
 registro = logging.getLogger("tinotify.real_remoto")
@@ -19,6 +19,13 @@ _ACCESO_RECHAZADO = {CodigoHistorial.AUTENTICACION_NO_CONFIRMADA, CodigoHistoria
 
 
 CACHE_DETALLE_S = 300
+
+
+REFS_ANEXOS_S = 1800
+
+
+class AnexoNoDisponible(Exception):
+    """El anexo no existe en la última lectura del expediente (hay que abrir el expediente de nuevo)."""
 
 
 class ExpedienteNoEncontrado(Exception):
@@ -37,6 +44,7 @@ class ServicioMonitor:
         self._clave = clave_acreditacion if usuario is None else clave_de_usuario(clave_acreditacion, usuario)
         self._llave = config.monitor.clave_cifrado
         self._cache = {}  # caso_ref -> (instante, actuaciones): evita iniciar sesión en SIGAC por cada toque
+        self._refs = {}   # caso_ref -> (instante, {(actuación, anexo): (referencia, archivo)}): solo en memoria, nunca se envían al cliente
 
     def guardar_credenciales(self, usuario, clave, caso_login=None):
         nonce, cifrado = cifrar_credenciales(self._llave, usuario, clave, caso_login)
@@ -148,9 +156,42 @@ class ServicioMonitor:
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login, numero=numero))
         finally:
             del usuario, clave, caso_login
-        datos = [_actuacion_json(a) for a in sorted(actuaciones, key=lambda a: a.fecha, reverse=True)]
+        ordenadas = sorted(actuaciones, key=lambda a: a.fecha, reverse=True)
+        datos = [_actuacion_json(a) for a in ordenadas]
         self._cache[caso_ref] = (time.monotonic(), datos)
+        self._refs[caso_ref] = (time.monotonic(), {(i, j): (x.referencia, x.archivo) for i, a in enumerate(ordenadas)
+                                                   for j, x in enumerate(a.anexos) if x.referencia})
         return datos
+
+    def descargar_anexo(self, caso_ref, actuacion, anexo):
+        """Descarga un anexo de SIGAC a través de esta cuenta y lo devuelve (contenido, tipo, nombre). No se guarda nada.
+
+        Los índices son los de la última lectura del expediente (`historial_expediente`)."""
+        guardado = self._refs.get(caso_ref)
+        if guardado is None or time.monotonic() - guardado[0] > REFS_ANEXOS_S:
+            raise AnexoNoDisponible
+        entrada = guardado[1].get((actuacion, anexo))
+        if entrada is None:
+            raise AnexoNoDisponible
+        referencia, archivo = entrada
+        fila = next((f for f in self._almacen.expedientes() if f[0] == caso_ref), None)
+        if fila is None:
+            raise ExpedienteNoEncontrado
+        try:
+            numero, _, _ = descifrar_expediente(self._llave, caso_ref, fila[2], fila[3])
+        except CifradoNoValido:
+            raise ExpedienteNoEncontrado from None
+        credenciales = self._almacen.credenciales()
+        if credenciales is None:
+            raise SinCredenciales
+        usuario, clave, caso_login = descifrar_credenciales(self._llave, credenciales[1], credenciales[2])
+        cfg = self._config
+        try:
+            contenido, tipo, nombre = self._sesiones.con_cliente(lambda cliente: descargar_un_anexo(
+                cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login, numero=numero, referencia=referencia))
+        finally:
+            del usuario, clave, caso_login
+        return contenido, tipo, nombre or archivo or "anexo"
 
     def marcar_vistos(self, caso_ref=None):
         return self._almacen.marcar_vistos(caso_ref)
