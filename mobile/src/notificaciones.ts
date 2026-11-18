@@ -31,8 +31,13 @@ export const pushActivo = async (): Promise<boolean> => (await SecureStore.getIt
 export type Pestana = 'inicio' | 'casos' | 'actividad' | 'ajustes';
 const PESTANAS: Pestana[] = ['inicio', 'casos', 'actividad', 'ajustes'];
 
-/** Pestaña que debe abrir la app al tocar una notificación (el servidor la envía en `data.pestana`; nunca datos del caso). */
-export function pestanaDeNotificacion(respuesta: Notifications.NotificationResponse | null): Pestana | null {
-  const dato = respuesta?.notification.request.content.data?.pestana;
-  return typeof dato === 'string' && (PESTANAS as string[]).includes(dato) ? (dato as Pestana) : null;
+export type Destino = { pestana: Pestana; expediente?: string };
+
+/** Qué abrir al tocar una notificación: la pestaña y, si el aviso es de un único expediente, ese expediente (identificador opaco). */
+export function destinoDeNotificacion(respuesta: Notifications.NotificationResponse | null): Destino | null {
+  const datos = respuesta?.notification.request.content.data;
+  const pestana = datos?.pestana;
+  if (typeof pestana !== 'string' || !(PESTANAS as string[]).includes(pestana)) return null;
+  const expediente = typeof datos?.expediente === 'string' && /^[0-9a-f]{64}$/.test(datos.expediente) ? datos.expediente : undefined;
+  return { pestana: pestana as Pestana, ...(expediente ? { expediente } : {}) };
 }

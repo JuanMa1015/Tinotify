@@ -6,8 +6,8 @@ import Ajustes, { type SeccionAjustes } from './Ajustes';
 import { CambiarClave, EliminarCuenta } from './AuthPantallas';
 import { URL_SIGAC, esTokenDeUsuario } from './cuentas';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, type Actuacion, type Expediente } from './api';
-import { type Pestana } from './notificaciones';
+import { ErrorApi, descargarAnexo, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, type Actuacion, type Expediente } from './api';
+import { type Destino } from './notificaciones';
 import {
   canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
@@ -16,7 +16,7 @@ import { colores, espacio, radios } from './tema';
 type Props = {
   token: string; biometria: boolean; version: string;
   onBiometria: (activa: boolean) => Promise<void>; onSalir: () => Promise<void>;
-  destino?: Pestana | null; onDestinoAtendido?: () => void; correo?: string;
+  destino?: Destino | null; onDestinoAtendido?: () => void; correo?: string;
 };
 
 const saludo = () => {
@@ -38,7 +38,16 @@ export default function Principal({ token, correo, biometria, version, onBiometr
   const [seccionAjustes, setSeccionAjustes] = useState<SeccionAjustes | null>(null);
   const usuario = esTokenDeUsuario(token);
 
-  useEffect(() => { if (destino) { setPestana(destino); onDestinoAtendido?.(); void cargar(); } }, [destino]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const [pendiente, setPendiente] = useState<string | null>(null);  // expediente que pidió abrir una notificación
+  useEffect(() => {
+    if (!destino) return;
+    setPestana(destino.pestana); setAbierto(null); setSeccionAjustes(null);
+    if (destino.expediente) setPendiente(destino.expediente);
+    onDestinoAtendido?.(); void cargar();
+  }, [destino]);  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {  // abre el expediente de la notificación en cuanto el listado esté cargado
+    if (pendiente && expedientes) { const x = expedientes.find(e => e.id === pendiente); if (x) setAbierto(x); setPendiente(null); }
+  }, [pendiente, expedientes]);
 
   const cargar = useCallback(async () => {
     setRefrescando(true);
@@ -204,18 +213,35 @@ function Actividad({ ejecuciones }: { ejecuciones?: Ejecucion[] }) {
   </>;
 }
 
-function Anexo({ anexo }: { anexo: Actuacion['anexos'][number] }) {
+function Anexo({ anexo, token, expediente, actuacion, indice }: { anexo: Actuacion['anexos'][number]; token: string; expediente: string; actuacion: number; indice: number }) {
   const disponible = anexo.con_enlace === true;
-  return <View style={[s.anexo, disponible ? s.anexoActivo : s.anexoInactivo]}>
-    <Ionicons name={disponible ? 'document-attach' : 'document-outline'} size={22} color={disponible ? colores.marino : colores.textoSuave} />
-    <View style={{ flex: 1 }}>
-      <Text style={s.fuerteChico}>{anexo.descripcion || 'Anexo'}</Text>
-      {anexo.archivo !== '' && <Text style={s.pequeno}>{anexo.archivo}</Text>}
-      <Text style={[s.pequeno, { color: disponible ? '#3F7D1A' : colores.textoSuave, fontWeight: '600' }]}>
-        {disponible ? 'Archivo disponible en SIGAC' : 'Sin archivo descargable'}</Text>
+  const [bajando, setBajando] = useState(false);
+  const [error, setError] = useState('');
+
+  async function bajar() {
+    setBajando(true); setError('');
+    try { await descargarAnexo(token, expediente, actuacion, indice, anexo.archivo || anexo.descripcion || 'anexo'); }
+    catch (err) { setError(mensajeDe(err, 'No se pudo descargar el anexo.')); }
+    finally { setBajando(false); }
+  }
+
+  return <View style={[s.anexo, disponible ? s.anexoActivo : s.anexoInactivo, { flexDirection: 'column', alignItems: 'stretch' }]}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <Ionicons name={disponible ? 'document-attach' : 'document-outline'} size={22} color={disponible ? colores.marino : colores.textoSuave} />
+      <View style={{ flex: 1 }}>
+        <Text style={s.fuerteChico}>{anexo.descripcion || 'Anexo'}</Text>
+        {anexo.archivo !== '' && <Text style={s.pequeno}>{anexo.archivo}</Text>}
+        <Text style={[s.pequeno, { color: disponible ? '#3F7D1A' : colores.textoSuave, fontWeight: '600' }]}>
+          {disponible ? 'Archivo disponible' : 'Sin archivo descargable'}</Text>
+      </View>
+      {disponible && <Pressable accessibilityRole="button" accessibilityLabel={`Descargar ${anexo.archivo || anexo.descripcion}`} disabled={bajando} onPress={() => { void bajar(); }}
+        style={[s.abrirSigac, bajando && { opacity: 0.6 }]}>
+        <Text style={s.abrirSigacTxt}>{bajando ? 'Descargando…' : 'Descargar'}</Text></Pressable>}
     </View>
-    {disponible && <Pressable accessibilityRole="button" accessibilityLabel="Abrir SIGAC para descargar el archivo" onPress={() => { void Linking.openURL(URL_SIGAC); }} style={s.abrirSigac}>
-      <Text style={s.abrirSigacTxt}>Abrir SIGAC</Text></Pressable>}
+    {error !== '' && <>
+      <Text style={[s.pequeno, { color: colores.error }]} accessibilityLiveRegion="polite">{error}</Text>
+      <Text style={s.enlace} accessibilityRole="link" onPress={() => { void Linking.openURL(URL_SIGAC); }}>Abrir SIGAC</Text>
+    </>}
   </View>;
 }
 
@@ -280,7 +306,7 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
           <Descripcion texto={a.descripcion} />
           {a.anexos.length > 0 && <View style={{ marginTop: 10, gap: 8 }}>
             <Text style={s.pequeno}>Anexos ({a.anexos.length})</Text>
-            {a.anexos.map((x, j) => <Anexo key={j} anexo={x} />)}
+            {a.anexos.map((x, j) => <Anexo key={j} anexo={x} token={token} expediente={expediente.id} actuacion={i} indice={j} />)}
           </View>}
         </Tarjeta>))}
       <Text style={s.pequeno}>Lectura en vivo desde SIGAC a través de tu cuenta. Tinotify no guarda el contenido de las actuaciones.</Text>

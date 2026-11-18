@@ -10,7 +10,7 @@ import { Boton, PantallaCarga } from './src/componentes';
 import { cerrarSesionEnServidor, obtenerEstado } from './src/api';
 import { biometriaActiva, borrarCorreo, borrarToken, desbloquear, fijarBiometria, guardarCorreo, guardarToken, leerCorreo, leerToken } from './src/almacen';
 import { esTokenDeUsuario } from './src/cuentas';
-import { pestanaDeNotificacion, type Pestana } from './src/notificaciones';
+import { destinoDeNotificacion, type Destino } from './src/notificaciones';
 import { colores } from './src/tema';
 
 type Fase = 'cargando' | 'bloqueada' | 'bienvenida' | 'login' | 'registro' | 'propietario' | 'conectar' | 'principal';
@@ -19,7 +19,7 @@ export default function App() {
   const [fase, setFase] = useState<Fase>('cargando');
   const [token, setToken] = useState<string>();
   const [biometria, setBiometria] = useState(false);
-  const [destino, setDestino] = useState<Pestana | null>(null);
+  const [destino, setDestino] = useState<Destino | null>(null);
   const [correo, setCorreo] = useState<string>();
   const version = Constants.expoConfig?.version ?? '0.1.0';
 
@@ -38,7 +38,7 @@ export default function App() {
   }, [intentarDesbloqueo]);
 
   useEffect(() => {  // tocar una notificación abre la pestaña indicada (también con la app cerrada)
-    const abrir = (r: Notifications.NotificationResponse | null) => { const p = pestanaDeNotificacion(r); if (p) setDestino(p); };
+    const abrir = (r: Notifications.NotificationResponse | null) => { const d = destinoDeNotificacion(r); if (d) setDestino(d); };
     abrir(Notifications.getLastNotificationResponse());
     const escucha = Notifications.addNotificationResponseReceivedListener(abrir);
     return () => escucha.remove();
