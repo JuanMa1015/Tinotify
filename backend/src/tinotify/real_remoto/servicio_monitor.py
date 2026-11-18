@@ -10,7 +10,7 @@ from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.almacen import AlmacenNoDisponible
 from tinotify.real_remoto.cifrado import (
     CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, descifrar_credenciales, descifrar_expediente)
-from tinotify.real_remoto.monitor import caso_ref, leer_expedientes, leer_un_expediente
+from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, leer_expedientes, leer_un_expediente
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
 registro = logging.getLogger("tinotify.real_remoto")
@@ -30,15 +30,29 @@ class SinCredenciales(Exception):
 
 
 class ServicioMonitor:
-    def __init__(self, *, config, almacen, sesiones, referencia, clave_acreditacion, fcm=None):
+    def __init__(self, *, config, almacen, sesiones, referencia, clave_acreditacion, fcm=None, usuario=None):
         self._config, self._almacen, self._sesiones, self._fcm = config, almacen, sesiones, fcm
-        self._referencia, self._clave = referencia, clave_acreditacion
+        self._usuario = usuario  # None = propietario (con referencia acreditada); si no, un usuario (expedientes provisionales)
+        self._referencia = referencia
+        self._clave = clave_acreditacion if usuario is None else clave_de_usuario(clave_acreditacion, usuario)
         self._llave = config.monitor.clave_cifrado
         self._cache = {}  # caso_ref -> (instante, actuaciones): evita iniciar sesión en SIGAC por cada toque
 
     def guardar_credenciales(self, usuario, clave, caso_login=None):
         nonce, cifrado = cifrar_credenciales(self._llave, usuario, clave, caso_login)
         self._almacen.guardar_credenciales(VERSION_LLAVE, nonce, cifrado)
+
+    def conectar(self, usuario_sigac, clave, caso_login=None):
+        """Comprueba que SIGAC acepta las credenciales (un inicio de sesión) y SOLO entonces las guarda cifradas. Devuelve cuántos expedientes ve."""
+        cfg = self._config
+        opciones = {"listado_estructural": True} if cfg.total_casos is None else {}
+        try:
+            casos = self._sesiones.con_cliente(lambda cliente: cliente.autenticar(
+                usuario_sigac, clave, tipo=cfg.tipo, total_casos_esperado=cfg.total_casos, caso_login=caso_login, **opciones))
+            self.guardar_credenciales(usuario_sigac, clave, caso_login)
+        finally:
+            del usuario_sigac, clave, caso_login
+        return len(casos)
 
     def registrar_dispositivo(self, token):
         self._almacen.registrar_dispositivo(token)
@@ -189,7 +203,8 @@ class ServicioMonitor:
                 sorted([{"codigo": c, "etapa": e, "n": n} for (c, e), n in errores.items()], key=lambda d: (-d["n"], d["codigo"]))))
         if diagnosticos:
             registro.warning("monitor_diagnostico_anexos conteos=%s", json.dumps(diagnosticos, sort_keys=True))
-        semillas = {caso_ref(self._clave, INSTANCIA_REAL, self._referencia.numero): self._referencia.multiconjunto()}
+        semillas = ({caso_ref(self._clave, INSTANCIA_REAL, self._referencia.numero): self._referencia.multiconjunto()}
+                    if self._usuario is None else {})  # solo el propietario tiene un expediente acreditado
         try:
             plan, aviso = self._almacen.aplicar(lecturas, semillas)
         except AlmacenNoDisponible:
@@ -231,3 +246,24 @@ def _actuacion_json(a):
     return {"fecha": a.fecha.isoformat(), "etapa": a.etapa, "origen": a.origen, "destino": a.destino, "remitente": a.remitente,
             "descripcion": a.descripcion[:20000],
             "anexos": [{"descripcion": x.descripcion, "archivo": x.archivo, "sin_enlace": x.sin_enlace} for x in a.anexos]}
+
+
+class ServiciosMonitor:
+    """Un ServicioMonitor por usuario (None = propietario), sobre una vista del almacén ligada a ese usuario. Comparten el gestor de
+    sesiones SIGAC: solo hay una sesión en curso a la vez y un presupuesto común de inicios de sesión."""
+
+    def __init__(self, *, config, almacen, sesiones, referencia, clave_acreditacion, fcm=None):
+        self._raiz = almacen
+        self._args = dict(config=config, sesiones=sesiones, referencia=referencia, clave_acreditacion=clave_acreditacion, fcm=fcm)
+        self._cache = {}
+
+    def para(self, usuario=None):
+        if usuario not in self._cache:
+            self._cache[usuario] = ServicioMonitor(almacen=self._raiz.de(usuario), usuario=usuario, **self._args)
+        return self._cache[usuario]
+
+    def usuarios(self):
+        return {"propietario": self._raiz.de(None).credenciales() is not None, "usuarios": self._raiz.usuarios_con_credenciales()}
+
+    def avisos_pendientes_todos(self):
+        return self._raiz.avisos_pendientes_todos()
