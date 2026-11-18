@@ -2,6 +2,7 @@
 
 export const CONSENTIMIENTO = 'consentimiento-v1';
 export const URL_POLITICA = 'https://github.com/JuanMa1015/Tinotify/blob/main/docs/legal/politica-tratamiento-datos.md';
+export const URL_SIGAC = 'https://sigac.udea.edu.co/sigac/';
 export const URL_TERMINOS = 'https://github.com/JuanMa1015/Tinotify/blob/main/docs/legal/terminos-de-uso.md';
 
 /** Un token `tn_…` es de una cuenta de usuario; cualquier otro es el código del propietario. */

@@ -64,7 +64,7 @@ export const enviarPrueba = (token: string) => solicitar<{ enviados: number; inv
 
 export type Actuacion = {
   fecha: string; etapa: string; origen: string; destino: string; remitente: string; descripcion: string;
-  anexos: { descripcion: string; archivo: string; sin_enlace: boolean }[];
+  anexos: { descripcion: string; archivo: string; sin_enlace: boolean; con_enlace?: boolean }[];
 };
 // Lee SIGAC en ese momento a través del servidor (inicia sesión con tus credenciales guardadas): puede tardar hasta un minuto.
 export const obtenerActuaciones = (token: string, id: string) =>
