@@ -89,8 +89,8 @@ def test_token_uri_ajeno_se_rechaza(cuenta, tmp_path):
 
 class FcmFalso:
     def __init__(self, respuesta=fcm.OK): self.respuesta, self.enviados, self.datos = respuesta, [], []
-    def enviar(self, token, titulo, cuerpo, datos=None):
-        self.enviados.append((token, titulo, cuerpo)); self.datos.append(datos)
+    def enviar(self, token, titulo, cuerpo, datos=None, privado=False):
+        self.enviados.append((token, titulo, cuerpo)); self.datos.append(datos); self.privado = privado
         return self.respuesta
 
 
@@ -144,3 +144,12 @@ def test_la_variable_de_fcm_se_valida_en_la_configuracion(tmp_path, cuenta):
         Config.desde_entorno({**con_monitor, "TINOTIFY_RR_FCM_CUENTA_SERVICIO": str(tmp_path / "no-existe.json")})
     assert Config.desde_entorno({**con_monitor, "TINOTIFY_RR_FCM_CUENTA_SERVICIO": str(cuenta)}).fcm_cuenta == cuenta.resolve()
     assert Config.desde_entorno(con_monitor).fcm_cuenta is None
+
+
+def test_el_push_con_privado_oculta_el_texto_en_la_pantalla_de_bloqueo(cuenta):
+    t, vistos = transporte()
+    c = fcm.ClienteFcm(cuenta, transporte=t)
+    c.enviar(TOKEN_DISP, "Tinotify", "1 actuación nueva en el radicado 123", {"pestana": "casos"}, privado=True)
+    assert json.loads(vistos[-1][2])["message"]["android"]["notification"]["visibility"] == "PRIVATE"
+    c.enviar(TOKEN_DISP, "Tinotify", "prueba")
+    assert "visibility" not in json.loads(vistos[-1][2])["message"]["android"]["notification"]

@@ -74,13 +74,48 @@ def test_el_cifrado_liga_el_dato_a_su_expediente():
             pass
 
 
-def test_texto_del_push_solo_con_conteos_y_con_destino():
+def test_texto_del_push_sin_metadatos_solo_lleva_conteos_y_destino():
     p = lambda **k: SimpleNamespace(**{"novedades": 0, "expedientes_nuevos": 0, "expedientes_con_novedades": 0, "anomalias": 0, **k})  # noqa: E731
-    assert _texto_push(p(novedades=3, expedientes_con_novedades=2)) == ("3 actuaciones nuevas en 2 expedientes", "casos")
-    assert _texto_push(p(novedades=1, expedientes_con_novedades=1, expedientes_nuevos=1)) == ("1 actuación nueva en 1 expediente y 1 expediente nuevo", "casos")
-    assert _texto_push(p(expedientes_nuevos=1)) == ("Apareció un expediente nuevo en tu cuenta", "casos")
+    assert _texto_push(p(novedades=3, expedientes_con_novedades=2)) == ("3 actuaciones nuevas en 2 expedientes", "casos", None)
+    assert _texto_push(p(novedades=1, expedientes_con_novedades=1, expedientes_nuevos=1)) == ("1 actuación nueva en 1 expediente y 1 expediente nuevo", "casos", None)
+    assert _texto_push(p(expedientes_nuevos=1)) == ("Apareció un expediente nuevo en tu cuenta", "casos", None)
     assert _texto_push(p(expedientes_nuevos=4))[0] == "Aparecieron 4 expedientes nuevos en tu cuenta"
-    assert _texto_push(p(anomalias=1)) == ("Una lectura necesita tu revisión en SIGAC", "actividad")
+    assert _texto_push(p(anomalias=1)) == ("Una lectura necesita tu revisión en SIGAC", "actividad", None)
+
+
+def _plan_con(cambios, **k):
+    base = {"novedades": 0, "expedientes_nuevos": 0, "expedientes_con_novedades": 0, "anomalias": 0, "primera_ejecucion": False, "cambios": cambios}
+    return SimpleNamespace(**{**base, **k})
+
+
+def _c(ref, accion, n=0):
+    return SimpleNamespace(caso_ref=ref, accion=accion, novedades=n)
+
+
+META = {"a" * 64: (91256, "CLIENTE UNO", "En proceso"), "b" * 64: (92617, "CLIENTE DOS", "En proceso"),
+        "c" * 64: (93001, "CLIENTE TRES", "En proceso"), "d" * 64: (94002, "CLIENTE CUATRO", "En proceso")}
+
+
+def test_el_push_nombra_el_radicado_y_abre_directamente_el_expediente_unico():
+    texto, pestana, ref = _texto_push(_plan_con([_c("a" * 64, "novedades", 2), _c("b" * 64, "sin_cambios")]), META)
+    assert (texto, pestana, ref) == ("2 actuaciones nuevas en el radicado 91256", "casos", "a" * 64)
+    assert "CLIENTE" not in texto                                                      # el nombre del cliente no va en el push
+
+
+def test_el_push_con_varios_expedientes_los_lista_hasta_tres_y_luego_cuenta():
+    dos = _texto_push(_plan_con([_c("a" * 64, "novedades", 1), _c("b" * 64, "novedades", 2)]), META)
+    assert dos == ("3 actuaciones nuevas en los radicados 91256 y 92617", "casos", None)
+    tres = _texto_push(_plan_con([_c("a" * 64, "novedades", 1), _c("b" * 64, "novedades", 1), _c("c" * 64, "novedades", 1)]), META)
+    assert tres[0] == "3 actuaciones nuevas en los radicados 91256, 92617 y 93001"
+    cuatro = _texto_push(_plan_con([_c(r * 64, "novedades", 1) for r in "abcd"]), META)
+    assert cuatro[0] == "4 actuaciones nuevas en 4 expedientes" and cuatro[2] is None
+
+
+def test_el_push_de_expediente_nuevo_y_la_primera_ejecucion_no_avisa_de_nuevos():
+    assert _texto_push(_plan_con([_c("b" * 64, "nuevo")]), META) == ("Expediente nuevo: 92617", "casos", "b" * 64)
+    assert _texto_push(_plan_con([_c("a" * 64, "novedades", 1), _c("b" * 64, "nuevo")]), META)[0] == "1 actuación nueva en el radicado 91256 · Expediente nuevo: 92617"
+    texto, _, _ = _texto_push(_plan_con([_c("a" * 64, "nuevo"), _c("b" * 64, "nuevo")], primera_ejecucion=True, anomalias=1), META)
+    assert texto == "Una lectura necesita tu revisión en SIGAC"                         # línea base: no hay nada que decir de "nuevos"
 
 
 def test_la_notificacion_de_prueba_no_toca_el_estado_y_exige_fcm():

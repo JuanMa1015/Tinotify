@@ -136,3 +136,29 @@ def test_el_aviso_de_un_usuario_lleva_su_correo_de_destino_y_el_del_propietario_
     avisos = {a["usuario"]: a for a in m.c.get("/real/monitor/avisos", headers=MON).json()["avisos"]}
     assert avisos[uid].get("destino") == "destino@ejemplo.com"
     assert "destino" not in avisos[None]
+
+
+def test_los_avisos_llevan_el_detalle_de_expedientes_solo_en_el_mas_reciente_de_cada_dueno():
+    casos = casos_base()
+    m = Mundo(casos, cuentas=CuentasMemoria())
+    m.guardar_credenciales()
+    m.ejecutar()
+    primero = next(iter(casos))
+    casos[primero] = list(casos[primero]) + ["ACTUACION_POSTERIOR_FICTICIA"]
+    m.ejecutar()
+    casos[primero] = list(casos[primero]) + ["OTRA_ACTUACION_FICTICIA"]
+    m.ejecutar()                                         # dos avisos pendientes del propietario
+    avisos = m.c.get("/real/monitor/avisos", headers=MON).json()["avisos"]
+    assert len(avisos) == 2 and "expedientes" not in avisos[0] and len(avisos[1]["expedientes"]) == 1
+    detalle = avisos[1]["expedientes"][0]
+    assert set(detalle) == {"numero", "cliente", "estado", "novedades", "nuevo"} and detalle["novedades"] == 2
+    assert "ACTUACION" not in str(avisos)                # nunca el contenido de las actuaciones
+
+
+def test_la_pagina_abrir_es_publica_estatica_y_no_lleva_datos():
+    m = Mundo(casos_base())
+    r = m.c.get("/abrir")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "intent://abrir#Intent;scheme=tinotify;package=com.tinotify.app;end" in r.text
+    assert "Authorization" not in r.text and r.headers["x-frame-options"] == "DENY"
+    assert m.c.get("/abrir?x=<script>").text == r.text   # no refleja la entrada

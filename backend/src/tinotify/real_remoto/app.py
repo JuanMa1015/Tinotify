@@ -18,6 +18,7 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from starlette.concurrency import run_in_threadpool
@@ -42,7 +43,14 @@ from tinotify.services.politica_real_local import cargar_clave_acreditacion, pol
 
 registro = logging.getLogger("tinotify.real_remoto")
 _RECHAZOS_REGISTRADOS = {"n": 0}
-RUTAS_SIN_AUTENTICACION = ("/health",)
+RUTAS_SIN_AUTENTICACION = ("/health", "/abrir")
+_INTENT = "intent://abrir#Intent;scheme=tinotify;package=com.tinotify.app;end"
+PAGINA_ABRIR = f"""<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Abrir Tinotify</title><style>body{{font-family:system-ui,sans-serif;background:#D9E4F4;color:#14213D;margin:0;padding:32px 20px;text-align:center}}
+a.b{{display:inline-block;background:#14213D;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:999px;margin-top:16px}}p{{color:#52627C}}</style></head>
+<body><h1>Tinotify</h1><p>Abriendo la aplicación…</p><a class="b" href="{_INTENT}">Abrir Tinotify</a>
+<p>Si no se abre, instala Tinotify en tu teléfono Android o ábrela desde el menú de aplicaciones.</p>
+<script>setTimeout(function(){{location.href="{_INTENT}"}},300)</script></body></html>"""
 MAX_CUERPO_LOGIN = 2048
 # Fallos que significan «SIGAC no aceptó el acceso» frente a «SIGAC no respondió como se esperaba».
 _ACCESO_RECHAZADO = {CodigoHistorial.AUTENTICACION_NO_CONFIRMADA, CodigoHistorial.SESION_NO_CONFIRMADA,
@@ -205,6 +213,11 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         raise HTTPException(401, "Acceso requerido", headers={"WWW-Authenticate": "Bearer"})
 
     protegidas = [Depends(autorizar)]
+
+    @app.get("/abrir", response_class=HTMLResponse)
+    async def abrir_app():
+        """Página estática y pública a la que apuntan los botones de los correos: intenta abrir la app Tinotify. No lleva ni recibe datos."""
+        return HTMLResponse(PAGINA_ABRIR, headers={"X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer"})
 
     @app.get("/health")
     async def salud():

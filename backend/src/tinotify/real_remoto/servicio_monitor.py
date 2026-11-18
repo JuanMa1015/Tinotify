@@ -10,7 +10,7 @@ from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.almacen import AlmacenNoDisponible
 from tinotify.real_remoto.cifrado import (
     CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, descifrar_credenciales, descifrar_expediente)
-from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, leer_expedientes, leer_un_expediente
+from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, descargar_un_anexo, leer_expedientes, leer_un_expediente
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
 registro = logging.getLogger("tinotify.real_remoto")
@@ -19,6 +19,13 @@ _ACCESO_RECHAZADO = {CodigoHistorial.AUTENTICACION_NO_CONFIRMADA, CodigoHistoria
 
 
 CACHE_DETALLE_S = 300
+
+
+REFS_ANEXOS_S = 1800
+
+
+class AnexoNoDisponible(Exception):
+    """El anexo no existe en la última lectura del expediente (hay que abrir el expediente de nuevo)."""
 
 
 class ExpedienteNoEncontrado(Exception):
@@ -37,6 +44,7 @@ class ServicioMonitor:
         self._clave = clave_acreditacion if usuario is None else clave_de_usuario(clave_acreditacion, usuario)
         self._llave = config.monitor.clave_cifrado
         self._cache = {}  # caso_ref -> (instante, actuaciones): evita iniciar sesión en SIGAC por cada toque
+        self._refs = {}   # caso_ref -> (instante, {(actuación, anexo): (referencia, archivo)}): solo en memoria, nunca se envían al cliente
 
     def guardar_credenciales(self, usuario, clave, caso_login=None):
         nonce, cifrado = cifrar_credenciales(self._llave, usuario, clave, caso_login)
@@ -60,13 +68,15 @@ class ServicioMonitor:
     def borrar_dispositivo(self, token):
         return self._almacen.borrar_dispositivo(token)
 
-    def _notificar_push(self, plan):
+    def _notificar_push(self, plan, metadatos=None):
         """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Solo conteos: nunca radicados
         ni nombres, porque el texto se ve en la pantalla de bloqueo."""
         if self._fcm is None:
             return "no_configurado"
-        cuerpo, pestana = _texto_push(plan)
-        enviados, invalidos, errores = self._enviar_a_dispositivos(cuerpo, {"tipo": "novedades", "pestana": pestana})
+        cuerpo, pestana, expediente = _texto_push(plan, metadatos)
+        datos = {"tipo": "novedades", "pestana": pestana, **({"expediente": expediente} if expediente else {})}
+        # `privado`: en la pantalla de bloqueo con seguridad el teléfono oculta el texto (que ahora lleva el radicado) hasta desbloquear.
+        enviados, invalidos, errores = self._enviar_a_dispositivos(cuerpo, datos, privado=True)
         return "enviado" if enviados else "fallido" if (invalidos or errores) else "sin_dispositivos"
 
     def enviar_prueba(self):
@@ -76,11 +86,11 @@ class ServicioMonitor:
         enviados, invalidos, _ = self._enviar_a_dispositivos("Notificación de prueba: tu teléfono recibe los avisos de Tinotify.", {"tipo": "prueba", "pestana": "inicio"})
         return enviados, invalidos
 
-    def _enviar_a_dispositivos(self, cuerpo, datos):
+    def _enviar_a_dispositivos(self, cuerpo, datos, privado=False):
         enviados = invalidos = errores = 0
         try:
             for token in self._almacen.dispositivos():
-                resultado = self._fcm.enviar(token, "Tinotify", cuerpo, datos)
+                resultado = self._fcm.enviar(token, "Tinotify", cuerpo, datos, privado)
                 if resultado == "ok":
                     enviados += 1
                 elif resultado == "token_invalido":
@@ -123,12 +133,9 @@ class ServicioMonitor:
     def canal_aviso(self, aviso, canal, estado):
         return self._almacen.fijar_canal_aviso(aviso, canal, estado)
 
-    def historial_expediente(self, caso_ref):
-        """Actuaciones de UN expediente leídas de SIGAC en este momento (inicia sesión con las credenciales guardadas). No se guardan."""
-        antes = time.monotonic()
-        guardado = self._cache.get(caso_ref)
-        if guardado and antes - guardado[0] < CACHE_DETALLE_S:
-            return guardado[1]
+    def _con_sesion_sigac(self, caso_ref, accion):
+        """Descifra el número del expediente y las credenciales guardadas, inicia sesión en SIGAC y ejecuta `accion(cliente, usuario, clave,
+        tipo=, total_casos=, caso_login=, numero=)`. Las credenciales no sobreviven a la llamada."""
         fila = next((f for f in self._almacen.expedientes() if f[0] == caso_ref), None)
         if fila is None:
             raise ExpedienteNoEncontrado
@@ -142,13 +149,38 @@ class ServicioMonitor:
         usuario, clave, caso_login = descifrar_credenciales(self._llave, credenciales[1], credenciales[2])
         cfg = self._config
         try:
-            actuaciones = self._sesiones.con_cliente(lambda cliente: leer_un_expediente(
+            return self._sesiones.con_cliente(lambda cliente: accion(
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login, numero=numero))
         finally:
             del usuario, clave, caso_login
-        datos = [_actuacion_json(a) for a in sorted(actuaciones, key=lambda a: a.fecha, reverse=True)]
+
+    def historial_expediente(self, caso_ref):
+        """Actuaciones de UN expediente leídas de SIGAC en este momento (inicia sesión con las credenciales guardadas). No se guardan."""
+        guardado = self._cache.get(caso_ref)
+        if guardado and time.monotonic() - guardado[0] < CACHE_DETALLE_S:
+            return guardado[1]
+        actuaciones = self._con_sesion_sigac(caso_ref, leer_un_expediente)
+        ordenadas = sorted(actuaciones, key=lambda a: a.fecha, reverse=True)
+        datos = [_actuacion_json(a) for a in ordenadas]
         self._cache[caso_ref] = (time.monotonic(), datos)
+        self._refs[caso_ref] = (time.monotonic(), {(i, j): (x.referencia, x.archivo) for i, a in enumerate(ordenadas)
+                                                   for j, x in enumerate(a.anexos) if x.referencia})
         return datos
+
+    def descargar_anexo(self, caso_ref, actuacion, anexo):
+        """Descarga un anexo de SIGAC a través de esta cuenta y lo devuelve (contenido, tipo, nombre). No se guarda nada.
+
+        Los índices son los de la última lectura del expediente (`historial_expediente`)."""
+        guardado = self._refs.get(caso_ref)
+        if guardado is None or time.monotonic() - guardado[0] > REFS_ANEXOS_S:
+            raise AnexoNoDisponible
+        entrada = guardado[1].get((actuacion, anexo))
+        if entrada is None:
+            raise AnexoNoDisponible
+        referencia, archivo = entrada
+        contenido, tipo, nombre = self._con_sesion_sigac(caso_ref, lambda cliente, usuario, clave, **kw: descargar_un_anexo(
+            cliente, usuario, clave, referencia=referencia, **kw))
+        return contenido, tipo, nombre or archivo or "anexo"
 
     def marcar_vistos(self, caso_ref=None):
         return self._almacen.marcar_vistos(caso_ref)
@@ -212,7 +244,7 @@ class ServicioMonitor:
             raise
         self._guardar_expedientes(plan, metadatos)
         if aviso:
-            estado_push = self._notificar_push(plan)
+            estado_push = self._notificar_push(plan, metadatos)
             try:
                 self._almacen.fijar_canal_aviso(aviso, "push", estado_push)
             except AlmacenNoDisponible:
@@ -229,17 +261,42 @@ def _plural(n, uno, varios):
     return f"{n} {uno if n == 1 else varios}"
 
 
-def _texto_push(plan):
-    """Texto genérico con conteos y la pestaña a abrir al tocar la notificación."""
+def _lista_radicados(numeros):
+    numeros = [str(n) for n in numeros]
+    return numeros[0] if len(numeros) == 1 else ", ".join(numeros[:-1]) + " y " + numeros[-1]
+
+
+def _texto_push(plan, metadatos=None):
+    """(texto, pestaña, expediente). Con `metadatos` el texto nombra los radicados (hasta tres); sin ellos, solo conteos.
+
+    `expediente` es el identificador opaco del único expediente afectado (la app lo abre directamente al tocar el aviso)."""
+    cambios = list(getattr(plan, "cambios", ()) or ())
+    if metadatos and cambios:
+        con_novedades = [(metadatos[c.caso_ref][0], c.novedades, c.caso_ref) for c in cambios
+                         if c.accion == "novedades" and c.caso_ref in metadatos]
+        nuevos = [(metadatos[c.caso_ref][0], c.caso_ref) for c in cambios
+                  if c.accion == "nuevo" and not plan.primera_ejecucion and c.caso_ref in metadatos]
+        partes = []
+        if con_novedades:
+            total = sum(n for _, n, _ in con_novedades)
+            donde = (f"el radicado {con_novedades[0][0]}" if len(con_novedades) == 1 else
+                     f"los radicados {_lista_radicados([x[0] for x in con_novedades])}" if len(con_novedades) <= 3 else
+                     f"{len(con_novedades)} expedientes")
+            partes.append(f"{_plural(total, 'actuación nueva', 'actuaciones nuevas')} en {donde}")
+        if nuevos:
+            partes.append(f"Expediente nuevo: {nuevos[0][0]}" if len(nuevos) == 1 else f"{len(nuevos)} expedientes nuevos")
+        if partes:
+            unico = (con_novedades[0][2] if len(con_novedades) == 1 and not nuevos else nuevos[0][1] if len(nuevos) == 1 and not con_novedades else None)
+            return " · ".join(partes), "casos", unico
     if plan.novedades:
         texto = f"{_plural(plan.novedades, 'actuación nueva', 'actuaciones nuevas')} en {_plural(plan.expedientes_con_novedades, 'expediente', 'expedientes')}"
         if plan.expedientes_nuevos:
             texto += f" y {_plural(plan.expedientes_nuevos, 'expediente nuevo', 'expedientes nuevos')}"
-        return texto, "casos"
+        return texto, "casos", None
     if plan.expedientes_nuevos:
         return ("Apareció un expediente nuevo en tu cuenta" if plan.expedientes_nuevos == 1
-                else f"Aparecieron {plan.expedientes_nuevos} expedientes nuevos en tu cuenta"), "casos"
-    return "Una lectura necesita tu revisión en SIGAC", "actividad"
+                else f"Aparecieron {plan.expedientes_nuevos} expedientes nuevos en tu cuenta"), "casos", None
+    return "Una lectura necesita tu revisión en SIGAC", "actividad", None
 
 
 def _actuacion_json(a):
@@ -276,4 +333,15 @@ class ServiciosMonitor:
                 correo = self.resolver_correo(a["usuario"])
                 if correo:
                     a["destino"] = correo
+        # Detalle para el correo: los expedientes con novedades sin ver de cada dueño, en su aviso MÁS RECIENTE (así no se repite la lista).
+        ultimos = {}
+        for a in avisos:
+            ultimos[a.get("usuario")] = a
+        for dueno, a in ultimos.items():
+            try:
+                a["expedientes"] = [{"numero": x["numero"], "cliente": x["cliente"], "estado": x["estado"],
+                                     "novedades": x["novedades_no_vistas"], "nuevo": x["nuevo"]}
+                                    for x in self.para(dueno).expedientes() if x["novedades_no_vistas"] or x["nuevo"]][:20]
+            except Exception:  # noqa: BLE001 - el detalle es opcional: sin él el correo sale con conteos
+                pass
         return avisos
