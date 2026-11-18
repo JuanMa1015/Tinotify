@@ -55,3 +55,11 @@ def test_una_ejecucion_que_quedo_en_curso_se_cierra_como_interrumpida_solo_si_es
     estado = lambda i: admin.execute("SELECT resultado, codigo, fin IS NOT NULL FROM tinotify_real.ejecuciones WHERE id = %s", (i,)).fetchone()  # noqa: E731
     assert estado(vieja) == ("error_interno", "interrumpida", True)
     assert estado(reciente) == ("en_curso", None, False)                                      # una revisión en marcha no se toca
+
+
+def test_el_estado_trae_el_codigo_de_la_ultima_ejecucion(mundo):
+    a, _ = mundo
+    e = a.iniciar_ejecucion()
+    a.cerrar_ejecucion(e, "ok", expedientes=3, novedades=0, codigo="casos_fallidos")
+    ultima = a.estado()["ultima_ejecucion"]
+    assert ultima["resultado"] == "ok" and ultima["codigo"] == "casos_fallidos"

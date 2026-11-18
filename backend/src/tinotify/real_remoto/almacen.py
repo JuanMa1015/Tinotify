@@ -176,7 +176,7 @@ class AlmacenPg:
 
     def estado(self):
         with self._tx() as con:
-            ultima = con.execute("SELECT resultado, inicio, fin FROM tinotify_real.ejecuciones "
+            ultima = con.execute("SELECT resultado, inicio, fin, codigo FROM tinotify_real.ejecuciones "
                                  "WHERE usuario_id IS NOT DISTINCT FROM %s::uuid ORDER BY inicio DESC LIMIT 1", (self._u,)).fetchone()
             expedientes = con.execute("SELECT count(*) FROM tinotify_real.estado_expediente "
                                       "WHERE usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)).fetchone()[0]
@@ -189,7 +189,8 @@ class AlmacenPg:
                                            (self._u,)).fetchone()[0] > 0
         return {"credenciales_guardadas": credenciales, "expedientes_en_estado": expedientes, "avisos_pendientes": pendientes,
                 "ultima_ejecucion": None if ultima is None else {
-                    "resultado": ultima[0], "inicio": ultima[1].isoformat(), "fin": ultima[2].isoformat() if ultima[2] else None}}
+                    "resultado": ultima[0], "inicio": ultima[1].isoformat(), "fin": ultima[2].isoformat() if ultima[2] else None,
+                    "codigo": ultima[3]}}
 
     # --- dispositivos (push) -------------------------------------------------------------------------------------------
     def registrar_dispositivo(self, token):
