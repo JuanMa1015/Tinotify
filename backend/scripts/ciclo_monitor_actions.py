@@ -32,6 +32,40 @@ def _esperar_servicio(c, esperar_s=180):
     return False
 
 
+def _revisar_todos(c, cabeceras):
+    """Revisa al propietario y, uno por uno, a cada usuario con credenciales. Un fallo no detiene a los demás. Devuelve los fallos.
+
+    Nunca se imprimen identificadores de usuario ni conteos: el registro de Actions es público."""
+    fallos = 0
+    try:
+        r = c.post("/real/monitor/ejecutar", headers=cabeceras, timeout=290)
+        if r.status_code not in (200, 412):  # 412: el propietario no tiene credenciales guardadas (no es un fallo)
+            print(f"fallo: revision_http_{r.status_code}")
+            fallos += 1
+    except httpx.HTTPError:
+        print("fallo: revision_sin_respuesta")
+        fallos += 1
+    try:
+        u = c.get("/real/monitor/usuarios", headers=cabeceras, timeout=60)
+    except httpx.HTTPError:
+        u = None
+    if u is None or u.status_code != 200:
+        if u is not None and u.status_code != 404:
+            print(f"fallo: usuarios_http_{u.status_code}")
+            fallos += 1
+        return fallos
+    for usuario in u.json().get("usuarios", []):
+        try:
+            r = c.post("/real/monitor/ejecutar", params={"usuario": usuario}, headers=cabeceras, timeout=290)
+            if r.status_code != 200:
+                print(f"fallo: revision_usuario_http_{r.status_code}")
+                fallos += 1
+        except httpx.HTTPError:
+            print("fallo: revision_usuario_sin_respuesta")
+            fallos += 1
+    return fallos
+
+
 def _informar(c, cabeceras, aviso, estado):
     """Dice al servidor cómo salió el correo de este aviso (la app lo muestra). Nunca interrumpe el ciclo."""
     try:
@@ -73,46 +107,50 @@ def main(entorno=None, enviar=enviar_correo, cliente=None):
         if not _esperar_servicio(c):
             print("fallo: servicio_sin_respuesta")
             return 3
-        try:
-            r = c.post("/real/monitor/ejecutar", headers=cabeceras, timeout=290)
-        except httpx.HTTPError:
-            print("fallo: revision_sin_respuesta")
-            return 3
-        if r.status_code != 200:
-            print(f"fallo: revision_http_{r.status_code}")
-            return 3
+        fallos = _revisar_todos(c, cabeceras)
         a = c.get("/real/monitor/avisos", headers=cabeceras, timeout=60)
         if a.status_code != 200:
             print(f"fallo: avisos_http_{a.status_code}")
             return 3
         avisos = a.json().get("avisos", [])
         if not avisos:
-            print("ok: sin_avisos")
-            return 0
+            print("ok: sin_avisos" if not fallos else "fallo: revisiones_con_errores")
+            return 0 if not fallos else 3
         if env.get("TINOTIFY_CORREO_ACTIVO") != "1":
             for aviso in avisos:
                 _informar(c, cabeceras, aviso, "desactivado")
-            print("ok: avisos_pendientes_correo_desactivado")
-            return 0
-        destino, usuario, clave = (env.get(k, "").strip() for k in
-                                   ("TINOTIFY_CORREO_DESTINO", "TINOTIFY_SMTP_USUARIO", "TINOTIFY_SMTP_CLAVE"))
-        if not (destino and usuario and clave):
+            print("ok: avisos_pendientes_correo_desactivado" if not fallos else "fallo: revisiones_con_errores")
+            return 0 if not fallos else 3
+        destino_propietario, usuario, clave = (env.get(k, "").strip() for k in
+                                               ("TINOTIFY_CORREO_DESTINO", "TINOTIFY_SMTP_USUARIO", "TINOTIFY_SMTP_CLAVE"))
+        if not (usuario and clave):
             print("fallo: correo_sin_configurar")
             return 2
+        envio_fallido = False
         for aviso in avisos:
+            # Un usuario: SU correo. El correo del propietario (secreto) es solo para los avisos del propietario: jamás para los de otro.
+            destino = aviso.get("destino") or (None if aviso.get("usuario") else destino_propietario)
+            if not destino:
+                _informar(c, cabeceras, aviso, "desactivado")  # sin correo de aviso: solo recibe la notificación del teléfono
+                if aviso.get("usuario"):
+                    c.post(f"/real/monitor/avisos/{aviso['id']}/entregado", headers=cabeceras, timeout=60)  # nada más que hacer por correo
+                continue
             try:
                 enviar(construir_correo(aviso, usuario, destino), usuario, clave)
             except (OSError, smtplib.SMTPException):
                 _informar(c, cabeceras, aviso, "fallido")
-                print("fallo: envio_de_correo")
-                return 4  # sin confirmar: el aviso sigue pendiente y se reintenta en la próxima ejecución
+                envio_fallido = True  # sin confirmar: el aviso sigue pendiente y se reintenta en la próxima ejecución
+                continue
             _informar(c, cabeceras, aviso, "enviado")
             e = c.post(f"/real/monitor/avisos/{aviso['id']}/entregado", headers=cabeceras, timeout=60)
             if e.status_code not in (200, 404):
                 print(f"fallo: confirmacion_http_{e.status_code}")
                 return 3
-        print("ok: avisos_enviados")
-        return 0
+        if envio_fallido:
+            print("fallo: envio_de_correo")
+            return 4
+        print("ok: avisos_enviados" if not fallos else "fallo: revisiones_con_errores")
+        return 0 if not fallos else 3
     finally:
         if propio:
             c.close()
