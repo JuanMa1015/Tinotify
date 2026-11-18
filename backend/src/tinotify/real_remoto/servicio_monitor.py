@@ -272,7 +272,8 @@ def _texto_push(plan, metadatos=None):
 def _actuacion_json(a):
     return {"fecha": a.fecha.isoformat(), "etapa": a.etapa, "origen": a.origen, "destino": a.destino, "remitente": a.remitente,
             "descripcion": a.descripcion[:20000],
-            "anexos": [{"descripcion": x.descripcion, "archivo": x.archivo, "sin_enlace": x.sin_enlace} for x in a.anexos]}
+            "anexos": [{"descripcion": x.descripcion, "archivo": x.archivo, "sin_enlace": x.sin_enlace, "con_enlace": bool(x.referencia)}
+                       for x in a.anexos]}
 
 
 class ServiciosMonitor:
