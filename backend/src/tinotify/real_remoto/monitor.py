@@ -160,3 +160,15 @@ def leer_un_expediente(cliente, usuario, clave, *, tipo, total_casos, caso_login
 def clave_de_usuario(clave_acreditacion, usuario):
     """Clave propia de cada usuario para huellas y caso_ref: dos personas con el mismo expediente no se correlacionan."""
     return hashlib.sha256(b"tinotify-usuario|" + usuario.encode("ascii") + b"|" + bytes(clave_acreditacion)).digest()
+
+
+def descargar_un_anexo(cliente, usuario, clave, *, tipo, total_casos, caso_login, numero, referencia):
+    """Inicia sesión, abre el expediente (como lo haría el navegador) y descarga UN anexo. Devuelve (contenido, tipo, nombre)."""
+    opciones = {"listado_estructural": True} if total_casos is None else {}
+    cliente.autenticar(usuario, clave, tipo=tipo, total_casos_esperado=total_casos, caso_login=caso_login, **opciones)
+    try:
+        _resolver_lectura(leer_historial_validado(cliente, numero))  # abrir el caso fija el contexto de la sesión
+    except SigacClientError as error:
+        if error.codigo is not CodigoHistorial.SIN_ACTUACIONES:
+            raise
+    return cliente.descargar_anexo(referencia)

@@ -69,3 +69,13 @@ def test_el_correo_informa_su_estado_y_la_actividad_lo_muestra():
     assert m.c.post(f"/real/monitor/avisos/{aviso}/canal", headers=MON, json={"canal": "correo", "estado": "fallido"}).json() == {"registrado": True}
     ultima = m.c.get("/real/monitor/ejecuciones", headers=CAB).json()["ejecuciones"][0]
     assert ultima["aviso"] == {"push": "no_configurado", "correo": "fallido"}   # sin FCM en la prueba: el push consta como no configurado
+
+
+def test_los_anexos_indican_si_tienen_enlace_de_descarga_sin_exponer_la_referencia():
+    from tinotify.domain.actuaciones import Actuacion, Anexo
+    from datetime import datetime
+    from tinotify.real_remoto.servicio_monitor import _actuacion_json
+    a = Actuacion(etapa="E", origen="O", destino="D", fecha=datetime(2026, 1, 1), remitente="R", descripcion="D",
+                  anexos=(Anexo("Con enlace", "a.pdf", "general.descargarAnexo.con?codigo=X"), Anexo("Sin enlace", "", "", sin_enlace=True)))
+    r = _actuacion_json(a)["anexos"]
+    assert [x["con_enlace"] for x in r] == [True, False] and "descargarAnexo" not in str(r) and "codigo" not in str(r)

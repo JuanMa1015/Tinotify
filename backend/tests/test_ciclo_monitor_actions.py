@@ -55,7 +55,7 @@ def test_envia_y_confirma(capsys):
     enviados = []
     assert ciclo.main(ENV, enviar=lambda m, u, k: enviados.append(m), cliente=c) == 0
     assert len(enviados) == 1 and enviados[0]["To"] == "d@example.com"
-    assert "2 actuación(es)" in enviados[0].get_content()
+    assert "2 actuación(es)" in enviados[0].get_body(preferencelist=("plain",)).get_content()
     assert ("POST", f"/real/monitor/avisos/{AVISO['id']}/entregado") in llamadas
     salida = capsys.readouterr().out
     assert salida.strip() == "ok: avisos_enviados" and "2" not in salida
@@ -145,3 +145,21 @@ def test_un_envio_fallido_no_impide_enviar_los_demas():
     assert intentos == ["d@example.com", "otra@ejemplo.com"]
     assert any(p == f"/real/monitor/avisos/{otro['id']}/entregado" for _, p in llamadas)
     assert not any(p == f"/real/monitor/avisos/{AVISO['id']}/entregado" for _, p in llamadas)
+
+
+def test_el_correo_lleva_radicado_nombre_y_los_dos_botones_y_escapa_el_html():
+    aviso = dict(AVISO, expedientes=[{"numero": 123, "cliente": "NOMBRE <b>FICTICIO</b>", "estado": "En proceso", "novedades": 2, "nuevo": False},
+                                      {"numero": 456, "cliente": "OTRO FICTICIO", "estado": "En proceso", "novedades": 0, "nuevo": True}])
+    m = ciclo.construir_correo(aviso, "o@example.com", "d@example.com", "https://x.example/abrir")
+    texto = m.get_body(preferencelist=("plain",)).get_content()
+    html = m.get_body(preferencelist=("html",)).get_content()
+    assert "Radicado 123 — NOMBRE <b>FICTICIO</b>: 2 actuación(es) nueva(s)" in texto and "Radicado 456 — OTRO FICTICIO: expediente nuevo" in texto
+    assert "https://sigac.udea.edu.co/sigac/" in texto and "https://x.example/abrir" in texto
+    assert "&lt;b&gt;FICTICIO" in html and "<b>FICTICIO" not in html                      # el nombre no inyecta HTML
+    assert "Ir a SIGAC" in html and "Abrir Tinotify" in html
+
+
+def test_sin_detalle_el_correo_sale_con_conteos_y_nunca_lleva_el_contenido_de_las_actuaciones():
+    m = ciclo.construir_correo(AVISO, "o@example.com", "d@example.com")
+    texto = m.get_body(preferencelist=("plain",)).get_content()
+    assert "2 actuación(es) nueva(s) en 1 expediente(s)" in texto and "Abrir Tinotify" not in texto
