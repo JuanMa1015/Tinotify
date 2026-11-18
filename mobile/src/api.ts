@@ -1,3 +1,6 @@
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { nombreSeguro } from './archivos';
 import { baseURL } from './config';
 import { CONSENTIMIENTO, esTokenDeUsuario } from './cuentas';
 import type { Ejecucion, EstadoMonitor } from './revisiones';
@@ -80,3 +83,21 @@ export const cerrarSesionEnServidor = (token: string) => solicitar<{ cerrada: bo
 export const cambiarClave = (token: string, actual: string, nueva: string) => solicitar<{ cambiada: boolean }>('/auth/cambiar-clave', token, { cuerpo: { actual, nueva } });
 export const eliminarCuenta = (token: string, clave: string) => solicitar<{ borrada: boolean }>('/auth/cuenta', token, { metodo: 'DELETE', cuerpo: { clave } });
 export const crearInvitacion = (token: string) => solicitar<{ codigo: string; vigencia_dias: number }>('/auth/invitaciones', token, { cuerpo: {} });
+
+/** Baja un anexo a través del servidor (que lo pide a SIGAC con tus credenciales; no se guarda allí) y abre el menú para verlo o compartirlo. */
+export async function descargarAnexo(token: string, id: string, actuacion: number, anexo: number, nombre: string): Promise<void> {
+  const destino = `${FileSystem.cacheDirectory}${nombreSeguro(nombre)}`;
+  let r: FileSystem.FileSystemDownloadResult;
+  try {
+    r = await FileSystem.downloadAsync(`${baseURL}/real/expedientes/${id}/actuaciones/${actuacion}/anexos/${anexo}`, destino,
+      { headers: { Authorization: `Bearer ${token}` } });
+  } catch { throw new ErrorApi('Sin conexión con el servidor. Reintenta en un momento.', null); }
+  if (r.status !== 200) {
+    await FileSystem.deleteAsync(destino, { idempotent: true });
+    throw new ErrorApi(r.status === 404 ? 'El anexo ya no está disponible: cierra el expediente y ábrelo de nuevo.' :
+      r.status === 429 ? 'Demasiados intentos. Espera unos minutos.' : r.status === 409 ? 'Ya hay un acceso en curso. Espera un momento.' :
+      r.status === 502 || r.status === 503 ? 'SIGAC no entregó el archivo. Inténtalo de nuevo o ábrelo en SIGAC.' : 'No se pudo descargar el anexo.', r.status);
+  }
+  if (!(await Sharing.isAvailableAsync())) throw new ErrorApi('Este teléfono no puede abrir archivos desde la aplicación.', null);
+  await Sharing.shareAsync(r.uri, { dialogTitle: nombre });
+}
