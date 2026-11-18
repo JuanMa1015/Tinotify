@@ -18,24 +18,40 @@ export type EstadoMonitor = {
   credenciales_guardadas: boolean;
   expedientes_en_estado: number;
   avisos_pendientes: number;
-  ultima_ejecucion: { resultado: string; inicio: string; fin: string | null } | null;
+  ultima_ejecucion: { resultado: string; inicio: string; fin: string | null; codigo?: string | null } | null;
 };
 
 export type Resumen = { titulo: string; detalle: string; requiereAtencion: boolean };
 
-export function resumenDeEstado(estado: EstadoMonitor): Resumen {
+const MS_HUERFANA = 20 * 60 * 1000;
+const CODIGOS: Record<string, string> = {
+  casos_fallidos: 'Algunos expedientes no se pudieron leer en esta revisión.',
+  sesion_ocupada: 'Había otro acceso a SIGAC en curso.',
+  presupuesto_agotado: 'Demasiados accesos seguidos a SIGAC; se reintentará.',
+  interrumpida: 'La revisión se interrumpió (por ejemplo, por un reinicio del servidor).',
+};
+
+export function resumenDeEstado(estado: EstadoMonitor, ahora: Date = new Date()): Resumen {
   if (!estado.credenciales_guardadas) {
     return { titulo: 'Sin cuenta conectada', detalle: 'Conecta tu cuenta de SIGAC para empezar.', requiereAtencion: true };
   }
   const ultima = estado.ultima_ejecucion;
   if (!ultima) return { titulo: 'Esperando la primera revisión', detalle: 'Se hará en el próximo horario.', requiereAtencion: false };
+  if (ultima.resultado === 'en_curso') {  // una revisión «en curso» que lleva mucho tiempo se quedó a medias
+    return ahora.getTime() - new Date(ultima.inicio).getTime() > MS_HUERFANA
+      ? { titulo: 'Revisión interrumpida', detalle: CODIGOS.interrumpida, requiereAtencion: true }
+      : { titulo: 'Revisión en curso', detalle: 'Aún no ha terminado.', requiereAtencion: false };
+  }
+  if ((ultima.resultado === 'ok' || ultima.resultado === 'linea_base') && ultima.codigo === 'casos_fallidos') {
+    return { titulo: 'Revisión parcial', detalle: CODIGOS.casos_fallidos, requiereAtencion: true };
+  }
   switch (ultima.resultado) {
     case 'ok': return { titulo: 'Todo al día', detalle: 'Sin novedades en la última revisión.', requiereAtencion: false };
     case 'linea_base': return { titulo: 'Seguimiento iniciado', detalle: 'Desde ahora te avisamos de lo nuevo.', requiereAtencion: false };
     case 'anomalia': return { titulo: 'Hay una lectura por revisar', detalle: 'Revisa SIGAC para confirmar.', requiereAtencion: true };
     case 'error_acceso': return { titulo: 'Actualiza tu clave', detalle: 'SIGAC no aceptó tus datos de acceso.', requiereAtencion: true };
     case 'error_sigac': return { titulo: 'SIGAC no respondió', detalle: 'Reintentaremos en la próxima revisión.', requiereAtencion: true };
-    default: return { titulo: 'Revisión con problemas', detalle: 'Reintentaremos en la próxima revisión.', requiereAtencion: true };
+    default: return { titulo: ultima.codigo === 'interrumpida' ? 'Revisión interrumpida' : 'Revisión con problemas', detalle: (ultima.codigo && CODIGOS[ultima.codigo]) || 'Reintentaremos en la próxima revisión.', requiereAtencion: true };
   }
 }
 
@@ -88,12 +104,12 @@ export function duracionTexto(inicio: string, fin: string | null): string | null
 }
 
 export function resumenDeEjecucion(e: Ejecucion): { titulo: string; detalle: string; ok: boolean } {
-  const base = resumenDeEstado({ credenciales_guardadas: true, expedientes_en_estado: 0, avisos_pendientes: 0, ultima_ejecucion: { resultado: e.resultado, inicio: e.inicio, fin: e.fin } });
+  const base = resumenDeEstado({ credenciales_guardadas: true, expedientes_en_estado: 0, avisos_pendientes: 0, ultima_ejecucion: { resultado: e.resultado, inicio: e.inicio, fin: e.fin, codigo: e.codigo } });
   const partesDetalle: string[] = [];
   if (e.expedientes !== null) partesDetalle.push(`${e.expedientes} ${e.expedientes === 1 ? 'expediente revisado' : 'expedientes revisados'}`);
   if (e.novedades) partesDetalle.push(`${e.novedades} ${e.novedades === 1 ? 'actuación nueva' : 'actuaciones nuevas'}`);
-  if (e.resultado === 'en_curso') return { titulo: 'Revisión en curso', detalle: 'Aún no ha terminado.', ok: true };
-  return { titulo: base.titulo, detalle: partesDetalle.join(' · ') || base.detalle, ok: !base.requiereAtencion };
+  if (e.resultado === 'en_curso') return { titulo: base.titulo, detalle: base.detalle, ok: !base.requiereAtencion };
+  return { titulo: base.titulo, detalle: base.requiereAtencion ? base.detalle : (partesDetalle.join(' · ') || base.detalle), ok: !base.requiereAtencion };
 }
 
 const PREFIJO_FILAS = 'TINOTIFY_FILAS_V1:';
@@ -123,4 +139,13 @@ export function tipoDireccion(origen: string, destino: string): Direccion {
   if (o === 'estudiante' && d === 'asesor') return 'estudiante_asesor';
   if (o === 'asesor' && d === 'estudiante') return 'asesor_estudiante';
   return 'otra';
+}
+
+export type TonoEstado = 'proceso' | 'cerrado' | 'otro';
+/** Clasifica el estado de un expediente para darle un color propio (en proceso, cerrado u otro). */
+export function tonoDeEstado(estado: string): TonoEstado {
+  const e = estado.trim().toLowerCase();
+  if (e.includes('proceso')) return 'proceso';
+  if (/(terminad|cerrad|finaliz|archivad)/.test(e)) return 'cerrado';
+  return 'otro';
 }
