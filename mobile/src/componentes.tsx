@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import { ActivityIndicator, Animated, Image, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Animated, Image, Pressable, StyleSheet, Text, TextInput, View, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colores, radios, espacio } from './tema';
 
@@ -56,6 +56,22 @@ export function BarraInferior({ activa, onElegir }: { activa: string; onElegir: 
   </View>;
 }
 
+export function Campo({ icono, etiqueta, valor, onCambio, secreto, teclado, mayusculas, verContrasena, visible, derecha }: {
+  icono: Icono; etiqueta: string; valor: string; onCambio: (v: string) => void; secreto?: boolean;
+  teclado?: 'default' | 'email-address'; mayusculas?: boolean; verContrasena?: () => void; visible?: boolean; derecha?: ReactNode;
+}) {
+  return <View style={e.campo}>
+    <Ionicons name={icono} size={20} color={colores.textoSuave} />
+    <TextInput accessibilityLabel={etiqueta} placeholder={etiqueta} placeholderTextColor={colores.textoSuave} value={valor} onChangeText={onCambio}
+      secureTextEntry={secreto} keyboardType={teclado ?? 'default'} autoCapitalize={mayusculas ? 'characters' : 'none'} autoCorrect={false}
+      autoComplete="off" importantForAutofill="no" spellCheck={false} contextMenuHidden={secreto} style={e.entrada} />
+    {verContrasena
+      ? <Pressable accessibilityRole="button" accessibilityLabel={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'} onPress={verContrasena} hitSlop={12}>
+          <Ionicons name={visible ? 'eye-off-outline' : 'eye-outline'} size={22} color={colores.textoSuave} /></Pressable>
+      : derecha}
+  </View>;
+}
+
 export function Esqueleto({ alto = 20, ancho = '100%', estilo }: { alto?: number; ancho?: number | `${number}%`; estilo?: ViewStyle }) {
   const opacidad = useRef(new Animated.Value(0.45)).current;
   useEffect(() => {
@@ -83,6 +99,8 @@ export function PantallaCarga({ texto }: { texto?: string }) {
 }
 
 export const e = StyleSheet.create({
+  campo: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colores.borde, borderRadius: radios.pildora, paddingHorizontal: 16, backgroundColor: colores.superficie, marginBottom: espacio.m, minHeight: 52 },
+  entrada: { flex: 1, fontSize: 16, color: colores.texto, paddingVertical: 12 },
   boton: { minHeight: 52, borderRadius: radios.pildora, paddingHorizontal: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   botonPri: { backgroundColor: colores.marino }, botonSec: { backgroundColor: colores.azulChip, borderWidth: 1, borderColor: colores.borde },
   botonOff: { opacity: 0.5 }, botonTxt: { color: colores.blanco, fontSize: 17, fontWeight: '600' },

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Image, Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Linking, Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Acceso from './Acceso';
+import { CambiarClave, EliminarCuenta } from './AuthPantallas';
+import { esTokenDeUsuario } from './cuentas';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, enviarPrueba, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, olvidarCredenciales, type Actuacion, type Expediente } from './api';
+import { ErrorApi, crearInvitacion, enviarPrueba, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, olvidarCredenciales, type Actuacion, type Expediente } from './api';
 import { biometriaDisponible } from './almacen';
 import { activarPush, desactivarPush, pushActivo, type Pestana } from './notificaciones';
 import {
@@ -32,6 +34,8 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
   const [refrescando, setRefrescando] = useState(false);
   const [reconectando, setReconectando] = useState(false);
   const [abierto, setAbierto] = useState<Expediente | null>(null);
+  const [cuenta, setCuenta] = useState<'cambiar' | 'eliminar' | null>(null);
+  const usuario = esTokenDeUsuario(token);
 
   useEffect(() => { if (destino) { setPestana(destino); onDestinoAtendido?.(); void cargar(); } }, [destino]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -53,28 +57,35 @@ export default function Principal({ token, biometria, version, onBiometria, onSa
     return <Acceso tokenFijo={token} onCancelar={() => setReconectando(false)} onListo={async () => { setReconectando(false); await cargar(); }} />;
   }
 
+  if (cuenta === 'cambiar') return <CambiarClave token={token} onCancelar={() => setCuenta(null)} onListo={() => { setCuenta(null); Alert.alert('Contraseña actualizada', 'Se cerró la sesión en tus otros dispositivos.'); }} />;
+  if (cuenta === 'eliminar') return <EliminarCuenta token={token} onCancelar={() => setCuenta(null)} onEliminada={onSalir} />;
   if (abierto) return <DetalleExpediente token={token} expediente={abierto} onVolver={() => setAbierto(null)} />;
 
   return <View style={{ flex: 1 }}>
     <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
-      {pestana === 'inicio' && <Inicio estado={estado} />}
+      {pestana === 'inicio' && <Inicio estado={estado} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
       {pestana === 'ajustes' && <Ajustes biometria={biometria} version={version} onBiometria={onBiometria} onSalir={onSalir} token={token}
-        onError={setError} onReconectar={() => setReconectando(true)} />}
+        onError={setError} onReconectar={() => setReconectando(true)} usuario={usuario} onCuenta={setCuenta} />}
     </ScrollView>
     <BarraInferior activa={pestana} onElegir={setPestana} />
   </View>;
 }
 
-function Inicio({ estado }: { estado?: EstadoMonitor }) {
+function Inicio({ estado, onConectar }: { estado?: EstadoMonitor; onConectar: () => void }) {
   const resumen = estado ? resumenDeEstado(estado) : undefined;
   const proxima = proximaRevision(new Date());
   return <>
     <Titulo texto={saludo()} subtitulo="Resumen del seguimiento de tu cuenta de SIGAC" />
     {!estado ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto /></> : <>
+      {!estado.credenciales_guardadas && <Tarjeta>
+        <Text style={s.fuerte}>Conecta tu cuenta de SIGAC</Text>
+        <Text style={[s.cuerpo, { marginBottom: 10 }]}>Aún no hay credenciales guardadas, así que no se revisa nada. Conéctala para empezar el seguimiento.</Text>
+        <Boton texto="Conectar SIGAC" icono="link-outline" onPress={onConectar} />
+      </Tarjeta>}
       <Tarjeta oscura estilo={{ overflow: 'hidden' }}>
         <Image source={require('../assets/gato-ojos.png')} accessible={false} resizeMode="contain" style={s.ojos} />
         <Text style={s.claro}><Ionicons name="calendar-outline" size={14} /> Última revisión</Text>
@@ -241,9 +252,9 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
   </View>;
 }
 
-type AjustesProps = Pick<Props, 'biometria' | 'version' | 'onBiometria' | 'onSalir'> & { token: string; onError: (m: string) => void; onReconectar: () => void };
+type AjustesProps = Pick<Props, 'biometria' | 'version' | 'onBiometria' | 'onSalir'> & { token: string; onError: (m: string) => void; onReconectar: () => void; usuario: boolean; onCuenta: (c: 'cambiar' | 'eliminar') => void };
 
-function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onReconectar }: AjustesProps) {
+function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onReconectar, usuario, onCuenta }: AjustesProps) {
   const [hayBiometria, setHayBiometria] = useState(false);
   const [push, setPush] = useState(false);
   useEffect(() => { void biometriaDisponible().then(setHayBiometria); void pushActivo().then(setPush); }, []);
@@ -265,6 +276,13 @@ function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onR
     } catch (err) { onError(mensajeDe(err, 'No se pudo enviar la notificación de prueba.')); }
   }
 
+  async function invitar() {
+    try {
+      const r = await crearInvitacion(token);
+      await Share.share({ message: `Código de invitación de Tinotify (vale ${r.vigencia_dias} días y un solo uso): ${r.codigo}` });
+    } catch (err) { onError(mensajeDe(err, 'No se pudo crear la invitación.')); }
+  }
+
   function confirmarOlvidar() {
     Alert.alert('Olvidar mis credenciales', 'Se borran del servidor tu usuario y clave de SIGAC y tu estado de seguimiento. Tinotify dejará de revisar tu cuenta hasta que la conectes de nuevo.', [
       { text: 'Cancelar', style: 'cancel' },
@@ -279,6 +297,18 @@ function Ajustes({ biometria, version, onBiometria, onSalir, token, onError, onR
     <Texto>Úsalo si cambiaste tu clave en SIGAC. Mientras no la actualices, las revisiones fallarán.</Texto>
     <Boton texto="Olvidar mis credenciales" secundario icono="trash-outline" onPress={confirmarOlvidar} />
     <Texto>Borra del servidor tus datos de acceso y el estado de seguimiento.</Texto>
+
+    {usuario ? <>
+      <Seccion texto="Cuenta de Tinotify" />
+      <Boton texto="Cambiar contraseña" secundario icono="key-outline" onPress={() => onCuenta('cambiar')} />
+      <View style={{ height: espacio.m }} />
+      <Boton texto="Eliminar mi cuenta" secundario icono="trash-outline" onPress={() => onCuenta('eliminar')} />
+      <Texto>Elimina tu cuenta y todos tus datos del servidor. No se puede deshacer.</Texto>
+    </> : <>
+      <Seccion texto="Invitaciones" />
+      <Boton texto="Invitar a una persona" secundario icono="person-add-outline" onPress={() => { void invitar(); }} />
+      <Texto>Genera un código de un solo uso, válido por 7 días, y lo compartes tú.</Texto>
+    </>}
 
     <Seccion texto="Avisos" />
     <Tarjeta>
