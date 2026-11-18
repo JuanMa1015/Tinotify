@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from tinotify.real_remoto import cuentas as c
+from tinotify.real_remoto.cifrado import CifradoNoValido, cifrar_correo, descifrar_correo
 
 DURACION_SESION = timedelta(days=30)
 DURACION_INVITACION = timedelta(days=7)
@@ -39,10 +40,11 @@ def _ahora() -> datetime:
 
 
 class ServicioCuentas:
-    def __init__(self, almacen, llave: bytes, *, reloj=_ahora, n_scrypt: int = c.N_SCRYPT):
+    def __init__(self, almacen, llave: bytes, *, reloj=_ahora, n_scrypt: int = c.N_SCRYPT, llave_correo: bytes | None = None):
         if len(llave) < 32:
             raise ValueError("llave_corta")
         self._a, self._llave, self._reloj, self._n = almacen, llave, reloj, n_scrypt
+        self._llave_correo = llave_correo  # con ella, el correo se guarda CIFRADO para poder enviar los avisos
 
     # --- administración ------------------------------------------------------------------------------------------
     def crear_invitacion(self) -> str:
@@ -56,9 +58,10 @@ class ServicioCuentas:
         correo = c.normalizar_correo(correo)
         c.validar_clave(clave, correo)
         ahora = self._reloj()
+        cifrado = cifrar_correo(self._llave_correo, correo) if self._llave_correo else None
         usuario_id = self._a.registrar_usuario(
             c.hash_invitacion(invitacion), c.correo_ref(self._llave, correo), c.hash_clave(clave, n=self._n),
-            consentimiento_version, ahora)  # atómico: consume la invitación y crea la cuenta, o no hace nada
+            consentimiento_version, ahora, correo=cifrado)  # atómico: consume la invitación y crea la cuenta, o no hace nada
         return self._nueva_sesion(usuario_id, dispositivo, ahora), Usuario(usuario_id, False)
 
     def iniciar_sesion(self, correo: str, clave: str, dispositivo: str | None = None):
@@ -85,6 +88,18 @@ class ServicioCuentas:
         token, hash_ = c.nuevo_token()
         self._a.crear_sesion(usuario_id, hash_, (dispositivo or "")[:60] or None, ahora + DURACION_SESION)
         return token
+
+    def correo_de(self, usuario_id: str) -> str | None:
+        """Correo al que avisar a este usuario (descifrado solo para enviar el aviso); None si no hay o no se puede leer."""
+        if not self._llave_correo:
+            return None
+        guardado = self._a.correo_cifrado_de(usuario_id)
+        if guardado is None:
+            return None
+        try:
+            return descifrar_correo(self._llave_correo, *guardado)
+        except CifradoNoValido:
+            return None
 
     # --- sesiones ------------------------------------------------------------------------------------------------
     def autenticar(self, token: str | None) -> Usuario | None:

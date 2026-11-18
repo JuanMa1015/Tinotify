@@ -20,15 +20,19 @@ class AlmacenMemoria:
 
     def crear_invitacion(self, h, expira): self.invitaciones[h] = {"expira": expira, "usada": False}
 
-    def registrar_usuario(self, inv, ref, pass_hash, version, ahora):
+    def registrar_usuario(self, inv, ref, pass_hash, version, ahora, correo=None):
         i = self.invitaciones.get(inv)
         if i is None or i["usada"] or i["expira"] <= ahora or any(u["ref"] == ref for u in self.usuarios.values()):
             raise RegistroNoValido
         uid = str(uuid.uuid4())
         self.usuarios[uid] = {"id": uid, "ref": ref, "pass_hash": pass_hash, "activo": True, "es_admin": False,
-                              "intentos_fallidos": 0, "bloqueado_hasta": None}
+                              "intentos_fallidos": 0, "bloqueado_hasta": None, "correo": correo}
         i["usada"] = True
         return uid
+
+    def correo_cifrado_de(self, uid):
+        u = self.usuarios.get(uid)
+        return u["correo"] if u and u.get("correo") else None
 
     def usuario_por_correo_ref(self, ref): return next((dict(u) for u in self.usuarios.values() if u["ref"] == ref), None)
     def usuario_por_id(self, uid): return dict(self.usuarios[uid]) if uid in self.usuarios else None
@@ -176,3 +180,23 @@ def test_eliminar_cuenta_exige_la_clave_y_borra_todo(mundo):
 def test_llave_corta_se_rechaza():
     with pytest.raises(ValueError):
         ServicioCuentas(AlmacenMemoria(), b"corta")
+
+
+def test_el_correo_de_aviso_se_guarda_cifrado_y_se_descifra_solo_para_avisar():
+    a = AlmacenMemoria()
+    reloj = Reloj()
+    s = ServicioCuentas(a, LLAVE, reloj=reloj, n_scrypt=2**10, llave_correo=b"c" * 32)
+    token, usuario = s.registrar("Persona@Ejemplo.com", CLAVE, s.crear_invitacion(), CONSENT)
+    nonce, cifrado = a.usuarios[usuario.id]["correo"]
+    assert b"persona" not in cifrado and b"ejemplo" not in cifrado
+    assert s.correo_de(usuario.id) == "persona@ejemplo.com"
+    assert ServicioCuentas(a, LLAVE, llave_correo=b"z" * 32).correo_de(usuario.id) is None        # otra llave: no se lee
+    assert ServicioCuentas(a, LLAVE).correo_de(usuario.id) is None                                  # sin llave configurada: no se lee
+    assert s.correo_de("no-existe") is None
+
+
+def test_sin_llave_de_correo_el_registro_funciona_sin_guardar_correo():
+    a = AlmacenMemoria()
+    s = ServicioCuentas(a, LLAVE, reloj=Reloj(), n_scrypt=2**10)
+    _, usuario = s.registrar("persona@ejemplo.com", CLAVE, s.crear_invitacion(), CONSENT)
+    assert a.usuarios[usuario.id]["correo"] is None

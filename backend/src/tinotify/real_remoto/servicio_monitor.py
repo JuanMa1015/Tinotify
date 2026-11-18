@@ -256,6 +256,7 @@ class ServiciosMonitor:
         self._raiz = almacen
         self._args = dict(config=config, sesiones=sesiones, referencia=referencia, clave_acreditacion=clave_acreditacion, fcm=fcm)
         self._cache = {}
+        self.resolver_correo = None  # función usuario_id -> correo; la fija la aplicación si hay cuentas
 
     def para(self, usuario=None):
         if usuario not in self._cache:
@@ -266,4 +267,12 @@ class ServiciosMonitor:
         return {"propietario": self._raiz.de(None).credenciales() is not None, "usuarios": self._raiz.usuarios_con_credenciales()}
 
     def avisos_pendientes_todos(self):
-        return self._raiz.avisos_pendientes_todos()
+        """Avisos pendientes de todos para el ciclo de Actions. Los de un usuario llevan `destino` (su correo, descifrado solo aquí);
+        los del propietario no: Actions usa el correo configurado como secreto."""
+        avisos = self._raiz.avisos_pendientes_todos()
+        for a in avisos:
+            if a.get("usuario") and self.resolver_correo is not None:
+                correo = self.resolver_correo(a["usuario"])
+                if correo:
+                    a["destino"] = correo
+        return avisos
