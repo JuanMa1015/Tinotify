@@ -119,7 +119,7 @@ la sección 2 con tu autorización; el cambio de Render es un paso aparte.
 
 ## 9. Monitor (opcional, se activa solo con sus variables)
 
-Con las variables del monitor (ver `render.real-remoto.propuesta.yaml`) el servicio añade: guardar las credenciales **cifradas** (AES-256-GCM;
+Con las variables del monitor (ver `render.yaml`) el servicio añade: guardar las credenciales **cifradas** (AES-256-GCM;
 la llave solo está en Render) al iniciar sesión con `"recordar": true`, y revisar **todos** los expedientes comparando huellas con clave contra
 el estado en Supabase (`tinotify_real`; ver `docs/monitor-real-supabase.md`). Rutas: `POST /real/monitor/ejecutar`, `GET /real/monitor/avisos` y
 `POST /real/monitor/avisos/{id}/entregado` (token del monitor, distinto del de la app); `GET /real/monitor/estado` y `DELETE /real/credenciales` (token

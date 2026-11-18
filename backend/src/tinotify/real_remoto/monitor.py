@@ -155,3 +155,8 @@ def leer_un_expediente(cliente, usuario, clave, *, tipo, total_casos, caso_login
             return []
         raise
     return actuaciones
+
+
+def clave_de_usuario(clave_acreditacion, usuario):
+    """Clave propia de cada usuario para huellas y caso_ref: dos personas con el mismo expediente no se correlacionan."""
+    return hashlib.sha256(b"tinotify-usuario|" + usuario.encode("ascii") + b"|" + bytes(clave_acreditacion)).digest()

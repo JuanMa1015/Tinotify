@@ -22,7 +22,7 @@ VARIABLES_MONITOR = {PREFIJO + x for x in (
 OBLIGATORIAS_MONITOR = {PREFIJO + x for x in ("PG_HOST", "PG_USER", "PG_PASSWORD", "PG_CA_FILE", "CLAVE_CIFRADO", "MONITOR_TOKEN")}
 VARIABLES = {PREFIJO + x for x in (
     "MODO", "TOKEN", "TLS", "PROXIES_CONFIABLES", "ACREDITACION_FILE", "REFERENCIA_FILE", "TIPO", "TOTAL_CASOS",
-    "TTL_MIN", "MAX_LOGINS", "VENTANA_LOGIN_MIN", "FCM_CUENTA_SERVICIO")} | VARIABLES_MONITOR
+    "TTL_MIN", "MAX_LOGINS", "VENTANA_LOGIN_MIN", "FCM_CUENTA_SERVICIO", "CUENTAS")} | VARIABLES_MONITOR
 _HOST_PG = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _USUARIO_PG = re.compile(r"^tinotify_real_login(\.[a-z0-9]{8,40})?$")
 
@@ -139,6 +139,7 @@ class Config:
     max_logins: int = 3
     ventana_login_s: int = 900
     monitor: ConfigMonitor | None = None   # opcional: base de datos, llave de cifrado y token propios
+    cuentas: bool = False   # opcional: rutas /auth (registro por invitación). Exige el monitor y la migración de cuentas aplicada
     fcm_cuenta: Path | None = field(repr=False, default=None)   # opcional: cuenta de servicio de Firebase (push); exige el monitor
 
     def __repr__(self):
@@ -178,6 +179,11 @@ class Config:
         max_logins = _numero(e.get(PREFIJO + "MAX_LOGINS", "3"), 1, 10, "max_logins_no_valido", tipo=int)
         ventana = _numero(e.get(PREFIJO + "VENTANA_LOGIN_MIN", "15"), 1, 120, "ventana_no_valida", tipo=int) * 60
         monitor = _monitor(e, token)
+        cuentas = e.get(PREFIJO + "CUENTAS", "")
+        if cuentas not in ("", "0", "1"):
+            _rechazar("cuentas_no_valido")
+        if cuentas == "1" and monitor is None:
+            _rechazar("cuentas_sin_monitor")
         fcm = e.get(PREFIJO + "FCM_CUENTA_SERVICIO")
         if fcm not in (None, ""):
             if monitor is None:
@@ -188,7 +194,7 @@ class Config:
         return cls(modo=modo, token=token, tls=tls, proxies_confiables=proxies, tipo=tipo, total_casos=total,
                    acreditacion=_archivo(e.get(PREFIJO + "ACREDITACION_FILE", ""), "acreditacion_ausente"),
                    referencia=_archivo(e.get(PREFIJO + "REFERENCIA_FILE", ""), "referencia_ausente"),
-                   ttl_s=ttl, max_logins=max_logins, ventana_login_s=ventana, monitor=monitor, fcm_cuenta=fcm)
+                   ttl_s=ttl, max_logins=max_logins, ventana_login_s=ventana, monitor=monitor, fcm_cuenta=fcm, cuentas=cuentas == "1")
 
 
 __all__ = ["Config", "ConfigMonitor", "ConfigPg", "clave_desde_texto", "ConfiguracionInsegura", "VariablesAjenas", "MODO_LOCAL", "MODO_REMOTO", "PROXIES_PRIVADAS", "TLS_DIRECTO", "TLS_PROXY"]

@@ -100,7 +100,7 @@ def estructura_documento(html):
 
 
 def _termina_en_html(html):
-    """True si tras el ÚLTIMO `</html>` solo hay espacios y comentarios completos hasta el final.
+    r"""True si tras el ÚLTIMO `</html>` solo hay espacios y comentarios completos hasta el final.
 
     Equivale a la expresión `</html\s*>\s*(?:<!--.*?-->\s*)*$` pero en tiempo lineal: esa forma, con un cuantificador anidado
     sobre texto no confiable, puede retroceder de manera catastrófica."""

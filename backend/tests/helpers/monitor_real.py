@@ -77,12 +77,37 @@ class AlmacenMemoria:
         self.avisos = {}       # id -> dict
         self.ejecuciones = []  # dicts
         self.caido = False
+        self._padre = None
+        self._hijos = {}
         self._bloqueo = threading.Lock()
         self.escrituras_de_huellas = 0
 
     def _vivo(self):
-        if self.caido:
+        if self.caido or (self._padre is not None and self._padre.caido):
             raise AlmacenNoDisponible
+
+    def de(self, usuario):
+        if usuario is None:
+            return self
+        if usuario not in self._hijos:
+            hijo = AlmacenMemoria()
+            hijo._padre = self
+            self._hijos[usuario] = hijo
+        return self._hijos[usuario]
+
+    def usuarios_con_credenciales(self):
+        self._vivo()
+        return [u for u, h in self._hijos.items() if h.cred is not None]
+
+    def avisos_pendientes_todos(self):
+        self._vivo()
+        salida = [dict(a, usuario=None) for a in self.avisos_pendientes()]
+        for u, h in self._hijos.items():
+            salida += [dict(a, usuario=u) for a in h.avisos_pendientes()]
+        return salida
+
+    def _todos(self):
+        return [self, *self._hijos.values()]
 
     def verificar(self):
         self._vivo()
@@ -152,7 +177,7 @@ class AlmacenMemoria:
 
     def fijar_canal_aviso(self, aviso, canal, estado):
         self._vivo()
-        if aviso not in self.avisos:
+        if not any(aviso in h.avisos for h in self._todos()):
             return False
         self.__dict__.setdefault("canales", {})[(aviso, canal)] = estado
         return True
@@ -196,11 +221,14 @@ class AlmacenMemoria:
 
     def marcar_entregado(self, aviso):
         self._vivo()
-        a = self.avisos.get(aviso)
-        if a is None or a["entregado"]:
-            return False
-        a.update(entregado=True, intentos=a["intentos"] + 1)
-        return True
+        for h in self._todos():
+            a = h.avisos.get(aviso)
+            if a is not None:
+                if a["entregado"]:
+                    return False
+                a.update(entregado=True, intentos=a["intentos"] + 1)
+                return True
+        return False
 
     def estado(self):
         self._vivo()
