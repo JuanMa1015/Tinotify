@@ -88,3 +88,32 @@ def descifrar_correo(llave, nonce, cifrado):
         return AESGCM(bytes(llave)).decrypt(bytes(nonce), bytes(cifrado), AAD_CORREO).decode("utf-8")
     except (InvalidTag, ValueError, TypeError, UnicodeError):
         raise CifradoNoValido("descifrado") from None
+
+
+def _aad_novedad(caso_ref):
+    return b"tinotify-real|novedad|v1|" + caso_ref.encode("ascii")
+
+
+CAMPOS_FICHA = {"fecha", "etapa", "origen", "destino", "remitente", "resumen", "anexos"}
+
+
+def cifrar_novedad(llave, caso_ref, ficha):
+    """Ficha de una actuación nueva, cifrada y ligada a su `caso_ref`."""
+    if not isinstance(llave, (bytes, bytearray)) or len(llave) != 32 or not isinstance(caso_ref, str) or not caso_ref.isascii():
+        raise CifradoNoValido("llave")
+    if not isinstance(ficha, dict) or set(ficha) - CAMPOS_FICHA:
+        raise CifradoNoValido("datos")
+    nonce = os.urandom(12)
+    return nonce, AESGCM(bytes(llave)).encrypt(nonce, json.dumps(ficha, separators=(",", ":")).encode("utf-8"), _aad_novedad(caso_ref))
+
+
+def descifrar_novedad(llave, caso_ref, nonce, cifrado):
+    if not isinstance(llave, (bytes, bytearray)) or len(llave) != 32:
+        raise CifradoNoValido("llave")
+    try:
+        ficha = json.loads(AESGCM(bytes(llave)).decrypt(bytes(nonce), bytes(cifrado), _aad_novedad(caso_ref)).decode("utf-8"))
+        if not isinstance(ficha, dict) or set(ficha) - CAMPOS_FICHA:
+            raise ValueError
+    except (InvalidTag, ValueError, KeyError, TypeError, UnicodeError):
+        raise CifradoNoValido("descifrado") from None
+    return ficha

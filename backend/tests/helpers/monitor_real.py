@@ -33,6 +33,7 @@ class SigacSimulado:
         self.casos, self.usuario, self.clave = casos, usuario, clave
         self.rechazar_login, self.caidos = rechazar_login, set(caidos)
         self.llamadas, self.logins = [], 0
+        self.nombre = "MARIA FICTICIA PEREZ DIAZ"
 
     def __call__(self, peticion):
         ruta = peticion.url.path.removeprefix("/sigac/")
@@ -50,6 +51,10 @@ class SigacSimulado:
             return httpx.Response(200, headers=cab, text=SELECTOR)
         if ruta == "sesion.cambiar.ses":
             return httpx.Response(302, headers={"location": "general.principal.con"})
+        if ruta == "general.banner.con":
+            if getattr(self, "sin_banner", False):
+                return httpx.Response(500, headers=cab, text="<html><body>ERROR</body></html>")
+            return httpx.Response(200, headers=cab, text=f'<html><body><div>Usuario:<table><tr><td><span class="tipo">Estudiante</span><span class="nombre">{self.nombre}</span></td></tr></table></div></body></html>')
         if ruta == "general.principal.con":
             return httpx.Response(200, headers=cab, text="<html><body>PRINCIPAL_FICTICIA</body></html>")
         if ruta == "casos.seleccionarCasos.con":
@@ -195,8 +200,23 @@ class AlmacenMemoria:
         return [(r, d["version"], d["nonce"], d["cifrado"], d["no_vistas"], d["nuevo"], d["ultima"])
                 for r, d in self.__dict__.get("expedientes_cifrados", {}).items()]
 
+    def guardar_novedades(self, filas):
+        self._vivo()
+        lista = self.__dict__.setdefault("novedades_cifradas", [])
+        for ref, version, nonce, cifrado in filas:
+            lista.append({"id": str(uuid4()), "ref": ref, "version": version, "nonce": nonce, "cifrado": cifrado, "vista": False,
+                          "detectada": f"2026-11-18T{len(lista) % 24:02d}:00:00+00:00"})
+
+    def novedades(self, limite=100):
+        self._vivo()
+        lista = self.__dict__.get("novedades_cifradas", [])
+        return [(n["id"], n["ref"], n["version"], n["nonce"], n["cifrado"], n["vista"], n["detectada"]) for n in reversed(lista)][:limite]
+
     def marcar_vistos(self, caso_ref=None):
         self._vivo()
+        for n in self.__dict__.get("novedades_cifradas", []):
+            if caso_ref in (None, n["ref"]):
+                n["vista"] = True
         total = 0
         for r, d in self.__dict__.get("expedientes_cifrados", {}).items():
             if caso_ref in (None, r) and (d["no_vistas"] or d["nuevo"]):
