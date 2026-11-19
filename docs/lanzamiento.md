@@ -46,6 +46,8 @@ Te pide una contraseña del almacén, tus datos (pueden ser mínimos) y la contr
    git push origin v0.1.0
    ```
 
+   Las **notas del release se generan solas**: toman la sección `## [x.y.z]` del `CHANGELOG`, añaden las instrucciones de instalación, el SHA-256 del APK y los avisos
+   importantes, y marcan como *pre-lanzamiento* las versiones `0.x`. Por eso la sección de la versión debe existir en el CHANGELOG **antes** de crear la etiqueta.
 3. En la pestaña **Actions → apk-release** se ve la compilación (unos 15 a 25 minutos). Al terminar, el APK queda en **Releases → v0.1.0**
    junto a su `.sha256`.
 4. Pasa a las personas el enlace del release (o el archivo `.apk`).
