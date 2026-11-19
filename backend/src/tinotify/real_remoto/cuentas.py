@@ -62,15 +62,18 @@ def hashes_iguales(a: str, b: str) -> bool:
 
 
 # --- código de acceso (cuentas que ya existen) ---
+def _digitos(codigo: str) -> str:
+    return re.sub(r"\D", "", codigo)
+
+
 def nuevo_codigo_acceso() -> str:
-    """Código legible XXXX-XXXX (8 caracteres sin ambiguos, ~40 bits). Vale 15 minutos, un solo uso y 5 intentos."""
-    letras = "".join(secrets.choice(_ALFABETO) for _ in range(8))
-    return f"{letras[:4]}-{letras[4:]}"
+    """Código de 6 dígitos (fácil de leer y de escribir en el teléfono). Vale 15 minutos, un solo uso y 5 intentos, y solo se pueden pedir 3 por hora."""
+    return f"{secrets.randbelow(10 ** 6):06d}"
 
 
 def hash_codigo_acceso(usuario_id: str, codigo: str) -> str:
     """Hash ligado al usuario: el mismo código no sirve para otra cuenta."""
-    return sha256_hex(f"acceso|{usuario_id}|{normalizar_invitacion(codigo)}")
+    return sha256_hex(f"acceso|{usuario_id}|{_digitos(codigo)}")
 
 
 # --- código de registro (cuenta nueva): sin estado, se recalcula ---
@@ -79,19 +82,13 @@ def ventana_registro(ahora) -> int:
 
 
 def codigo_registro(llave: bytes, correo_normalizado: str, invitacion: str, ventana: int) -> str:
-    """Código de 8 caracteres que solo conoce quien recibe el correo. Depende del correo y de la invitación, así que no sirve para otra."""
+    """Código de 6 dígitos que solo conoce quien recibe el correo. Depende del correo y de la invitación (que el atacante no conoce), así que no sirve para otra."""
     mac = hmac.new(llave, f"registro|{correo_normalizado}|{normalizar_invitacion(invitacion)}|{ventana}".encode(), hashlib.sha256).digest()
-    n = int.from_bytes(mac[:8], "big")
-    letras = []
-    for _ in range(8):
-        n, resto = divmod(n, len(_ALFABETO))
-        letras.append(_ALFABETO[resto])
-    return f"{''.join(letras[:4])}-{''.join(letras[4:])}"
+    return f"{int.from_bytes(mac[:8], 'big') % 10 ** 6:06d}"
 
 
 def codigo_registro_valido(llave: bytes, correo_normalizado: str, invitacion: str, codigo: str, ahora) -> bool:
     """Vale el de la ventana actual y el de la anterior (entre 10 y 20 minutos)."""
-    recibido = normalizar_invitacion(codigo)
+    recibido = _digitos(codigo)
     actual = ventana_registro(ahora)
-    return any(hmac.compare_digest(normalizar_invitacion(codigo_registro(llave, correo_normalizado, invitacion, v)), recibido)
-               for v in (actual, actual - 1))
+    return any(hmac.compare_digest(codigo_registro(llave, correo_normalizado, invitacion, v), recibido) for v in (actual, actual - 1))

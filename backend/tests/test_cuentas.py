@@ -49,18 +49,29 @@ def test_el_codigo_de_registro_es_estable_en_la_ventana_y_depende_de_todo():
     ahora = datetime(2026, 11, 18, 12, 3, tzinfo=timezone.utc)
     v = c.ventana_registro(ahora)
     codigo = c.codigo_registro(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", v)
-    assert len(codigo) == 9 and codigo[4] == "-" and not set(codigo.replace("-", "")) & set("01OIL")
+    assert len(codigo) == 6 and codigo.isdigit()
     assert codigo == c.codigo_registro(llave, "a@ejemplo.com", "aaaa bbbb cccc dddd", v)          # tolera el formato de la invitación
     for otro in (c.codigo_registro(llave, "b@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", v), c.codigo_registro(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDE", v),
                  c.codigo_registro(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", v + 1), c.codigo_registro(b"m" * 32, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", v)):
         assert otro != codigo
-    assert c.codigo_registro_valido(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", codigo.lower(), ahora)
+    assert c.codigo_registro_valido(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", f" {codigo[:3]} {codigo[3:]} ", ahora)   # tolera espacios
     assert c.codigo_registro_valido(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", codigo, ahora + timedelta(minutes=10))
     assert not c.codigo_registro_valido(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", codigo, ahora + timedelta(minutes=25))
     assert not c.codigo_registro_valido(llave, "a@ejemplo.com", "AAAA-BBBB-CCCC-DDDD", "AAAA-AAAA", ahora)
 
 
 def test_el_codigo_de_acceso_esta_ligado_al_usuario_y_normaliza():
-    assert len(c.nuevo_codigo_acceso()) == 9
-    assert c.hash_codigo_acceso("u1", "abcd-efgh") == c.hash_codigo_acceso("u1", " ABCD EFGH ")
-    assert c.hash_codigo_acceso("u1", "ABCD-EFGH") != c.hash_codigo_acceso("u2", "ABCD-EFGH")
+    codigos = {c.nuevo_codigo_acceso() for _ in range(50)}
+    assert all(len(x) == 6 and x.isdigit() for x in codigos) and len(codigos) > 40
+    assert c.hash_codigo_acceso("u1", "123456") == c.hash_codigo_acceso("u1", " 123 456 ")
+    assert c.hash_codigo_acceso("u1", "123456") != c.hash_codigo_acceso("u2", "123456")
+
+
+def test_las_plantillas_de_correo_estan_en_espanol_y_llevan_el_codigo_en_el_asunto():
+    from tinotify.real_remoto.plantillas_correo import correo_codigo, correo_prueba
+    asunto, texto, html = correo_codigo("123456", "entrar a tu cuenta", "15 minutos")
+    assert asunto == "123456 es tu código de Tinotify" and "123456" in texto and "15 minutos" in texto
+    assert '<html lang="es"' in html and "Content-Language" in html and ">123456<" in html and "entrar a tu cuenta" in html
+    assert "<script" not in html and "http://" not in html and "https://" not in html                                   # sin rastreadores ni imágenes externas
+    a2, t2, h2 = correo_prueba()
+    assert "funciona" in t2 and '<html lang="es"' in h2 and a2 == "Prueba de correo de Tinotify"

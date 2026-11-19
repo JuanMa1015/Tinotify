@@ -9,6 +9,7 @@ import re
 import httpx
 
 from tinotify.real_remoto import cuentas as c
+from tinotify.real_remoto.plantillas_correo import correo_prueba
 
 URL_BREVO = "https://api.brevo.com/v3/smtp/email"
 _CLAVE = re.compile(r"[A-Za-z0-9_.\-]{20,200}")
@@ -65,5 +66,4 @@ class ClienteBrevo:
 
     def enviar_prueba(self):
         """Un correo de prueba al propio remitente: sirve para comprobar la configuración. Mismo resultado que `enviar`."""
-        return self.enviar(self._remitente, "Prueba de correo de Tinotify", "Si lees esto, el correo de Tinotify funciona.",
-                           "<p>Si lees esto, el correo de Tinotify funciona.</p>")
+        return self.enviar(self._remitente, *correo_prueba())
