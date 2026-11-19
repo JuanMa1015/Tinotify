@@ -51,6 +51,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     return () => { vivo = false; };
   }, [token]);
   const [error, setError] = useState('');
+  const [lento, setLento] = useState(false);
   const [refrescando, setRefrescando] = useState(false);
   const [reconectando, setReconectando] = useState(false);
   const [abierto, setAbierto] = useState<Expediente | null>(null);
@@ -71,16 +72,17 @@ export default function Principal({ token, correo, biometria, version, onBiometr
 
   const cargar = useCallback(async () => {
     setRefrescando(true);
+    const aviso = setTimeout(() => setLento(true), 8000);  // el servidor gratuito duerme: la primera petición puede tardar un minuto
     try {
       obtenerExpedientes(token).then(r => setExpedientes(r.expedientes), () => setExpedientes(prev => prev ?? null));
       obtenerNovedades(token).then(r => { setNovedades(r.novedades); setNovedadesFallo(false); },
         err => { if (err instanceof ErrorApi && err.estado === 404) setNovedades(prev => prev ?? null); else setNovedadesFallo(true); });
-      const [e, x] = await Promise.all([obtenerEstado(token), obtenerEjecuciones(token).catch(() => ({ ejecuciones: [] as Ejecucion[] }))]);  // el historial es secundario: si falla, el resto sigue
-      setEstado(e); setEjecuciones(x.ejecuciones); setError('');
+      obtenerEjecuciones(token).then(x => setEjecuciones(x.ejecuciones), () => setEjecuciones(prev => prev ?? []));  // el historial es secundario: si falla, el resto sigue
+      setEstado(await obtenerEstado(token)); setError('');  // el resumen se muestra en cuanto llega, sin esperar al resto
     } catch (err) {
       setError(mensajeDe(err, 'No se pudo actualizar.'));
       if (err instanceof ErrorApi && err.estado === 401) await onSalir();
-    } finally { setRefrescando(false); }
+    } finally { clearTimeout(aviso); setLento(false); setRefrescando(false); }
   }, [token, onSalir]);
 
   useEffect(() => { void cargar(); }, [cargar]);
@@ -109,6 +111,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
+      {lento && refrescando && <Tarjeta><Text style={s.cuerpo}>El servidor estaba dormido y está despertando. La primera vez puede tardar hasta un minuto; después responde enseguida.</Text></Tarjeta>}
       {pestana === 'inicio' && <Inicio estado={estado} nombre={nombre || primerNombre(nombreSigac)} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'novedades' && <Novedades novedades={novedades} expedientes={expedientes} token={token} onCambio={setNovedades} onExpedientes={setExpedientes}
