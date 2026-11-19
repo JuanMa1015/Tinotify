@@ -264,7 +264,7 @@ function Novedades({ novedades, expedientes, token, onCambio, onExpedientes, onE
                 </View>
                 {!n.vista && <Etiqueta texto="Nueva" tono="lima" />}
               </View>
-              {(n.origen || n.destino) && <Sentido origen={n.origen} destino={n.destino} />}
+              {(n.origen !== '' || n.destino !== '') && <Sentido origen={n.origen} destino={n.destino} />}
               {n.resumen !== '' && <Text style={s.cuerpo} numberOfLines={3}>{n.resumen}</Text>}
               <Text style={s.pequeno}>Actuación del {fechaHoraBogota(n.fecha)} · detectada {fechaHoraBogota(n.detectada_en)}{n.anexos > 0 ? ` · ${n.anexos} ${n.anexos === 1 ? 'anexo' : 'anexos'}` : ''}</Text>
             </Tarjeta>
@@ -400,7 +400,7 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
         actuaciones.map((a, i) => <Tarjeta key={`${a.fecha}-${i}`}>
           <Text style={s.pequeno}>{fechaHoraBogota(a.fecha)}</Text>
           <Text style={s.fuerte}>{a.etapa || 'Actuación'}</Text>
-          {(a.origen || a.destino) && <Sentido origen={a.origen} destino={a.destino} />}
+          {(a.origen !== '' || a.destino !== '') && <Sentido origen={a.origen} destino={a.destino} />}
           {a.remitente !== '' && <Text style={s.pequeno}>Remitente: {a.remitente}</Text>}
           <Descripcion texto={a.descripcion} />
           {a.anexos.length > 0 && <View style={{ marginTop: 10, gap: 8 }}>
