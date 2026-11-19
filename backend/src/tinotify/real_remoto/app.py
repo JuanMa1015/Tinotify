@@ -218,6 +218,17 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
 
     protegidas = [Depends(autorizar)]
 
+    def admin_actual(credencial: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
+        """Administración: el propietario (token de la app; devuelve None) o una persona con la marca de administradora (devuelve su id)."""
+        token = credencial.credentials if credencial else None
+        if servicio_cuentas is not None and token and token.startswith("tn_"):
+            usuario = servicio_cuentas.autenticar(token)
+            if usuario is not None and usuario.es_admin:
+                return usuario.id
+            raise HTTPException(401, "Acceso requerido", headers={"WWW-Authenticate": "Bearer"})
+        autorizar(credencial)
+        return None
+
     @app.get("/abrir", response_class=HTMLResponse)
     async def abrir_app():
         """Página estática y pública a la que apuntan los botones de los correos: intenta abrir la app Tinotify. No lleva ni recibe datos."""
@@ -296,7 +307,7 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
         return datos
 
     if servicio_cuentas is not None:
-        registrar_cuentas(app, servicio=servicio_cuentas, protegidas_app=protegidas, reloj=reloj)
+        registrar_cuentas(app, servicio=servicio_cuentas, protegidas_app=protegidas, reloj=reloj, admin_actual=admin_actual)
     if servicio_monitor is not None:
         registrar_monitor(app, servicios=servicios, servicio_actual=servicio_actual, config=config, protegidas_app=protegidas,
                           http_desde_sigac=_http_desde_sigac, reloj=reloj)

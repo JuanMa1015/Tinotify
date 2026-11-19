@@ -2,9 +2,9 @@
 
 from backend.tests.test_monitor_real import Mundo, TOKEN_MONITOR, casos_base
 from backend.tests.test_real_remoto import CAB
+from backend.tests.test_rutas_cuentas import registrar
 from backend.tests.test_servicio_cuentas import AlmacenMemoria as CuentasMemoria
 
-CLAVE = "una-clave-ficticia-1"
 MON = {"Authorization": f"Bearer {TOKEN_MONITOR}"}
 
 
@@ -13,8 +13,7 @@ def bearer(t):
 
 
 def nuevo_usuario(m, correo):
-    inv = m.c.post("/auth/invitaciones", headers=CAB).json()["codigo"]
-    r = m.c.post("/auth/registro", json={"correo": correo, "clave": CLAVE, "invitacion": inv, "consentimiento": "consentimiento-v1"})
+    r = registrar(m, correo)
     assert r.status_code == 200
     return r.json()["usuario"], bearer(r.json()["token"])
 

@@ -139,3 +139,23 @@ def test_la_recuperacion_guarda_solo_el_hash_limita_por_hora_y_cuenta_los_intent
     assert a.consumir_recuperacion(u1, h1, ahora) is True and a.consumir_recuperacion(u1, h1, ahora) is False  # un solo uso
     admin.execute("DELETE FROM tinotify_real.usuarios WHERE id = %s::uuid", (u1,))
     assert admin.execute("SELECT count(*) FROM tinotify_real.recuperaciones").fetchone()[0] == 0
+
+
+def test_la_administracion_lista_con_conteos_y_borra_solo_los_datos_del_usuario(mundo):
+    from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg
+    base, admin, (u1, u2) = mundo
+    a = AlmacenCuentasPg(base._c)
+    for vista, ref in ((base.de(u1), H(11)), (base.de(u2), H(12))):
+        vista.aplicar({ref: Counter({H(50): 1})}, {})
+        vista.guardar_credenciales(1, b"n" * 12, b"c" * 20)
+        vista.iniciar_ejecucion()
+    admin.execute("INSERT INTO tinotify_real.dispositivos (token, usuario_id) VALUES (%s, %s::uuid)", ("t" * 30, u1))
+    filas = {f["id"]: f for f in a.listar_usuarios()}
+    assert filas[u1]["con_credenciales"] is True and filas[u1]["expedientes"] == 1 and filas[u1]["ultima_resultado"] == "en_curso"
+    a.borrar_datos_de(u1)
+    despues = {f["id"]: f for f in a.listar_usuarios()}
+    assert despues[u1]["con_credenciales"] is False and despues[u1]["expedientes"] == 0 and despues[u1]["ultima_resultado"] is None   # en cero
+    assert despues[u2]["con_credenciales"] is True and despues[u2]["expedientes"] == 1                                                 # el otro, intacto
+    assert admin.execute("SELECT count(*) FROM tinotify_real.dispositivos WHERE usuario_id = %s::uuid", (u1,)).fetchone()[0] == 0
+    assert a.fijar_activo(u1, False) is True and a.fijar_admin(u1, True) is True
+    assert {f["id"]: f for f in a.listar_usuarios()}[u1]["activo"] is False

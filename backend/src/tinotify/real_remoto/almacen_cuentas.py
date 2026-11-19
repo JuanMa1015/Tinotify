@@ -44,6 +44,11 @@ class AlmacenCuentasPg(AlmacenPg):
                                (usuario_id,)).fetchone()
         return None if fila is None or fila[0] is None else (bytes(fila[0]), bytes(fila[1]))
 
+    def invitacion_vigente(self, invitacion_hash, ahora):
+        with self._tx() as con:
+            return con.execute("SELECT 1 FROM tinotify_real.invitaciones WHERE codigo_hash = %s AND usado_en IS NULL AND expira_en > %s",
+                               (invitacion_hash, ahora)).fetchone() is not None
+
     def usuario_por_correo_ref(self, ref):
         with self._tx() as con:
             return _usuario(con.execute(f"SELECT {_USUARIO} FROM tinotify_real.usuarios WHERE correo_ref = %s", (ref,)).fetchone())
@@ -51,15 +56,6 @@ class AlmacenCuentasPg(AlmacenPg):
     def usuario_por_id(self, usuario_id):
         with self._tx() as con:
             return _usuario(con.execute(f"SELECT {_USUARIO} FROM tinotify_real.usuarios WHERE id = %s", (usuario_id,)).fetchone())
-
-    def registrar_fallo(self, usuario_id, fallos, bloqueado_hasta):
-        with self._tx() as con:
-            con.execute("UPDATE tinotify_real.usuarios SET intentos_fallidos = least(%s, 1000), bloqueado_hasta = %s WHERE id = %s",
-                        (fallos, bloqueado_hasta, usuario_id))
-
-    def limpiar_fallos(self, usuario_id):
-        with self._tx() as con:
-            con.execute("UPDATE tinotify_real.usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id = %s", (usuario_id,))
 
     def crear_sesion(self, usuario_id, token_hash, dispositivo, expira_en):
         with self._tx() as con:
@@ -80,11 +76,6 @@ class AlmacenCuentasPg(AlmacenPg):
     def revocar_todas(self, usuario_id, ahora):
         with self._tx() as con:
             con.execute("UPDATE tinotify_real.sesiones SET revocada_en = %s WHERE usuario_id = %s AND revocada_en IS NULL", (ahora, usuario_id))
-
-    def revocar_todas_menos(self, usuario_id, token_hash, ahora):
-        with self._tx() as con:
-            con.execute("UPDATE tinotify_real.sesiones SET revocada_en = %s WHERE usuario_id = %s AND token_hash <> %s AND revocada_en IS NULL",
-                        (ahora, usuario_id, token_hash))
 
     def crear_recuperacion(self, usuario_id, codigo_hash, expira_en, ahora, maximo_por_hora=3):
         """Guarda un código de recuperación (solo su hash). False si ya hubo `maximo_por_hora` solicitudes en la última hora. Anula el anterior."""
@@ -112,9 +103,32 @@ class AlmacenCuentasPg(AlmacenPg):
             con.execute("UPDATE tinotify_real.recuperaciones SET intentos = intentos + 1 WHERE id = %s", (fila[0],))
             return False
 
-    def cambiar_pass(self, usuario_id, pass_hash):
+    # --- administración (solo conteos y estados: nunca credenciales ni expedientes) -----------------------------------------
+    def listar_usuarios(self):
         with self._tx() as con:
-            con.execute("UPDATE tinotify_real.usuarios SET pass_hash = %s WHERE id = %s", (pass_hash, usuario_id))
+            filas = con.execute(
+                "SELECT u.id, u.activo, u.es_admin, u.consentimiento_en, u.correo_nonce, u.correo_cifrado, "
+                "EXISTS (SELECT 1 FROM tinotify_real.credenciales_usuario c WHERE c.usuario_id = u.id), "
+                "(SELECT count(*) FROM tinotify_real.estado_expediente e WHERE e.usuario_id = u.id), "
+                "(SELECT x.resultado FROM tinotify_real.ejecuciones x WHERE x.usuario_id = u.id ORDER BY x.inicio DESC LIMIT 1), "
+                "(SELECT x.inicio FROM tinotify_real.ejecuciones x WHERE x.usuario_id = u.id ORDER BY x.inicio DESC LIMIT 1) "
+                "FROM tinotify_real.usuarios u ORDER BY u.consentimiento_en, u.id").fetchall()
+        return [{"id": str(f[0]), "activo": f[1], "es_admin": f[2], "desde": f[3].isoformat(), "correo": None if f[4] is None else (bytes(f[4]), bytes(f[5])),
+                 "con_credenciales": f[6], "expedientes": f[7], "ultima_resultado": f[8], "ultima_inicio": f[9].isoformat() if f[9] else None} for f in filas]
+
+    def fijar_activo(self, usuario_id, activo):
+        with self._tx() as con:
+            return con.execute("UPDATE tinotify_real.usuarios SET activo = %s WHERE id = %s::uuid", (activo, usuario_id)).rowcount > 0
+
+    def fijar_admin(self, usuario_id, es_admin):
+        with self._tx() as con:
+            return con.execute("UPDATE tinotify_real.usuarios SET es_admin = %s WHERE id = %s::uuid", (es_admin, usuario_id)).rowcount > 0
+
+    def borrar_datos_de(self, usuario_id):
+        """Deja a ese usuario «en cero»: sin credenciales de SIGAC ni nada del seguimiento. La cuenta (correo y contraseña) se conserva."""
+        with self._tx() as con:
+            for tabla in ("credenciales_usuario", "estado_expediente", "avisos", "ejecuciones", "dispositivos"):  # huellas, expedientes y novedades caen en cascada
+                con.execute(f"DELETE FROM tinotify_real.{tabla} WHERE usuario_id = %s::uuid", (usuario_id,))
 
     def borrar_usuario(self, usuario_id):
         with self._tx() as con:

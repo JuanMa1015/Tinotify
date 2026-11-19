@@ -1,7 +1,8 @@
-"""Servicio de cuentas: registro por invitación, login, sesiones por dispositivo y borrado de cuenta.
+"""Servicio de cuentas: registro por invitación, acceso con código por correo, sesiones por dispositivo y administración.
 
-No conoce HTTP ni SQL: opera sobre un almacén (PostgreSQL en producción, memoria en pruebas). Los errores son de catálogo cerrado y
-nunca incluyen correos, contraseñas ni tokens; los fallos de login son idénticos exista o no el correo.
+No hay contraseñas de Tinotify: la persona demuestra que es dueña de su correo con un código de un solo uso. Eso verifica el correo (con
+el que llegan los avisos) y evita que haya que recordar o recuperar una clave más. No conoce HTTP ni SQL: opera sobre un almacén
+(PostgreSQL en producción, memoria en pruebas). Los errores son de catálogo cerrado y nunca incluyen correos ni tokens.
 """
 
 from dataclasses import dataclass
@@ -12,27 +13,28 @@ from tinotify.real_remoto.cifrado import CifradoNoValido, cifrar_correo, descifr
 
 DURACION_SESION = timedelta(days=30)
 DURACION_INVITACION = timedelta(days=7)
-MAX_FALLOS, BLOQUEO = 5, timedelta(minutes=15)
-DURACION_RECUPERACION = timedelta(minutes=15)
-MAX_RECUPERACIONES_HORA = 3
+DURACION_CODIGO_ACCESO = timedelta(minutes=15)
+MAX_CODIGOS_HORA = 3
 
 
 class RegistroNoValido(Exception):
-    """Invitación inexistente, usada o vencida, o correo ya registrado (no se distingue a propósito)."""
-
-
-class CredencialesIncorrectas(Exception):
-    pass
+    """Invitación inexistente, usada o vencida, código incorrecto o correo ya registrado (no se distingue a propósito)."""
 
 
 class CodigoNoValido(Exception):
-    """Código de recuperación incorrecto, vencido, usado o con demasiados intentos (no se distingue a propósito)."""
+    """Código de acceso incorrecto, vencido, usado o con demasiados intentos (no se distingue a propósito)."""
 
 
-class CuentaBloqueada(Exception):
-    def __init__(self, espera_s: int):
-        super().__init__("cuenta_bloqueada")
-        self.espera_s = espera_s
+class UsuarioNoEncontrado(Exception):
+    pass
+
+
+class AccionNoPermitida(Exception):
+    """Una persona administradora no puede suspenderse, borrarse ni quitarse el rol a sí misma."""
+
+
+class ConfirmacionIncorrecta(Exception):
+    """Para borrar la cuenta hay que escribir el correo de la cuenta."""
 
 
 @dataclass(frozen=True)
@@ -46,49 +48,96 @@ def _ahora() -> datetime:
 
 
 class ServicioCuentas:
-    def __init__(self, almacen, llave: bytes, *, reloj=_ahora, n_scrypt: int = c.N_SCRYPT, llave_correo: bytes | None = None, correo=None):
+    def __init__(self, almacen, llave: bytes, *, reloj=_ahora, llave_correo: bytes | None = None, correo=None):
         if len(llave) < 32:
             raise ValueError("llave_corta")
-        self._a, self._llave, self._reloj, self._n = almacen, llave, reloj, n_scrypt
-        self._correo = correo  # cliente de correo (Brevo) para el código de recuperación; None = recuperación desactivada
+        self._a, self._llave, self._reloj = almacen, llave, reloj
+        self._correo = correo  # cliente de correo (Brevo): envía los códigos; sin él nadie puede crear cuenta ni entrar con correo
         self._llave_correo = llave_correo  # con ella, el correo se guarda CIFRADO para poder enviar los avisos
 
-    # --- administración ------------------------------------------------------------------------------------------
+    # --- administración de invitaciones --------------------------------------------------------------------------
     def crear_invitacion(self) -> str:
         codigo, hash_ = c.nueva_invitacion()
         self._a.crear_invitacion(hash_, self._reloj() + DURACION_INVITACION)
         return codigo
 
-    # --- registro y login ----------------------------------------------------------------------------------------
-    def registrar(self, correo: str, clave: str, invitacion: str, consentimiento_version: str, dispositivo: str | None = None):
-        """Devuelve (token, usuario). `c.DatosNoValidos` si el formato es incorrecto; `RegistroNoValido` en lo demás."""
-        correo = c.normalizar_correo(correo)
-        c.validar_clave(clave, correo)
+    # --- envío de códigos ----------------------------------------------------------------------------------------
+    def _enviar_codigo(self, destino: str, codigo: str, asunto: str, frase: str, vigencia: str) -> str:
+        texto = f"{frase}: {codigo}\n\nVale {vigencia} y se usa una sola vez. Si no lo pediste, ignora este mensaje: nadie entra a tu cuenta sin este código."
+        html = ("<div style='font-family:Arial,sans-serif;color:#14213D;max-width:480px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
+                f"<p>{frase}:</p>"
+                f"<p style='font-size:28px;font-weight:700;letter-spacing:3px;margin:12px 0'>{codigo}</p>"
+                f"<p>Vale {vigencia} y se usa una sola vez. Si no lo pediste, ignora este mensaje: nadie entra a tu cuenta sin este código.</p></div>")
+        return "enviado" if self._correo.enviar(destino, asunto, texto, html) is None else "fallo_envio"
+
+    def solicitar_codigo_registro(self, correo: str, invitacion: str) -> str:
+        """Primer paso de la cuenta nueva: manda al correo el código que lo verifica. Estados: `enviado`, `invitacion_invalida`,
+        `ya_registrado`, `correo_invalido` o `fallo_envio`. No consume la invitación (eso ocurre al terminar el registro) ni guarda nada."""
+        try:
+            normalizado = c.normalizar_correo(correo)
+        except c.DatosNoValidos:
+            return "correo_invalido"
         ahora = self._reloj()
-        cifrado = cifrar_correo(self._llave_correo, correo) if self._llave_correo else None
+        if not self._a.invitacion_vigente(c.hash_invitacion(invitacion), ahora):
+            return "invitacion_invalida"
+        if self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado)) is not None:
+            return "ya_registrado"
+        if self._correo is None:
+            return "fallo_envio"
+        codigo = c.codigo_registro(self._llave, normalizado, invitacion, c.ventana_registro(ahora))
+        return self._enviar_codigo(normalizado, codigo, "Tu código para crear tu cuenta de Tinotify", "Tu código para crear tu cuenta de Tinotify es", "10 minutos")
+
+    def solicitar_codigo_acceso(self, correo: str) -> str:
+        """Manda un código de un solo uso para entrar. Estados: `enviado`, `no_registrado`, `limite` o `fallo_envio`. Es una beta cerrada: se
+        prefiere decirle con claridad a quien escribe qué ocurrió (el tope global de solicitudes limita el uso malintencionado)."""
+        try:
+            normalizado = c.normalizar_correo(correo)
+        except c.DatosNoValidos:
+            return "no_registrado"
+        fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
+        if fila is None or not fila["activo"]:
+            return "no_registrado"
+        if self._correo is None:
+            return "fallo_envio"
+        ahora = self._reloj()
+        codigo = c.nuevo_codigo_acceso()
+        if not self._a.crear_recuperacion(fila["id"], c.hash_codigo_acceso(fila["id"], codigo), ahora + DURACION_CODIGO_ACCESO, ahora, MAX_CODIGOS_HORA):
+            return "limite"
+        return self._enviar_codigo(normalizado, codigo, "Tu código para entrar a Tinotify", "Tu código para entrar a Tinotify es", "15 minutos")
+
+    def probar_correo(self):
+        """Solo para el propietario: envía un correo de prueba al remitente. Devuelve (enviado, motivo)."""
+        if self._correo is None:
+            return False, "correo_no_configurado"
+        motivo = self._correo.enviar_prueba()
+        return motivo is None, motivo
+
+    # --- registro y entrada --------------------------------------------------------------------------------------
+    def registrar(self, correo: str, codigo: str, invitacion: str, consentimiento_version: str, dispositivo: str | None = None):
+        """Segundo paso: con el código recibido por correo crea la cuenta (consume la invitación) y abre sesión.
+        `c.DatosNoValidos` si el correo no tiene formato; `RegistroNoValido` en todo lo demás."""
+        normalizado = c.normalizar_correo(correo)
+        ahora = self._reloj()
+        if not c.codigo_registro_valido(self._llave, normalizado, invitacion, codigo, ahora):
+            raise RegistroNoValido
+        cifrado = cifrar_correo(self._llave_correo, normalizado) if self._llave_correo else None
         usuario_id = self._a.registrar_usuario(
-            c.hash_invitacion(invitacion), c.correo_ref(self._llave, correo), c.hash_clave(clave, n=self._n),
+            c.hash_invitacion(invitacion), c.correo_ref(self._llave, normalizado), c.SIN_CLAVE,
             consentimiento_version, ahora, correo=cifrado)  # atómico: consume la invitación y crea la cuenta, o no hace nada
         return self._nueva_sesion(usuario_id, dispositivo, ahora), Usuario(usuario_id, False)
 
-    def iniciar_sesion(self, correo: str, clave: str, dispositivo: str | None = None):
-        ahora = self._reloj()
+    def entrar(self, correo: str, codigo: str, dispositivo: str | None = None):
+        """Entra con el código recibido por correo. Cierra el código (un solo uso) y abre una sesión en este dispositivo."""
         try:
-            ref = c.correo_ref(self._llave, c.normalizar_correo(correo))
+            normalizado = c.normalizar_correo(correo)
         except c.DatosNoValidos:
-            c.verificar_clave_inexistente(clave)
-            raise CredencialesIncorrectas from None
-        fila = self._a.usuario_por_correo_ref(ref)
+            raise CodigoNoValido from None
+        fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
         if fila is None or not fila["activo"]:
-            c.verificar_clave_inexistente(clave)
-            raise CredencialesIncorrectas
-        if fila["bloqueado_hasta"] and fila["bloqueado_hasta"] > ahora:
-            raise CuentaBloqueada(int((fila["bloqueado_hasta"] - ahora).total_seconds()) + 1)
-        if not c.verificar_clave(clave, fila["pass_hash"]):
-            fallos = fila["intentos_fallidos"] + 1
-            self._a.registrar_fallo(fila["id"], fallos, ahora + BLOQUEO if fallos >= MAX_FALLOS else None)
-            raise CredencialesIncorrectas
-        self._a.limpiar_fallos(fila["id"])
+            raise CodigoNoValido
+        ahora = self._reloj()
+        if not self._a.consumir_recuperacion(fila["id"], c.hash_codigo_acceso(fila["id"], codigo), ahora):
+            raise CodigoNoValido
         return self._nueva_sesion(fila["id"], dispositivo, ahora), Usuario(fila["id"], fila["es_admin"])
 
     def _nueva_sesion(self, usuario_id: str, dispositivo: str | None, ahora: datetime) -> str:
@@ -108,52 +157,46 @@ class ServicioCuentas:
         except CifradoNoValido:
             return None
 
-    # --- recuperar la contraseña ---------------------------------------------------------------------------------
-    @property
-    def recuperacion_disponible(self) -> bool:
-        return self._correo is not None
+    # --- administración --------------------------------------------------------------------------------------------
+    def listar_usuarios(self):
+        """Para el panel de administración: correo (si se puede leer), estado y conteos. Nunca credenciales de SIGAC ni expedientes."""
+        salida = []
+        for u in self._a.listar_usuarios():
+            correo = None
+            if u["correo"] and self._llave_correo:
+                try:
+                    correo = descifrar_correo(self._llave_correo, *u["correo"])
+                except CifradoNoValido:
+                    correo = None
+            salida.append({**{k: v for k, v in u.items() if k != "correo"}, "correo": correo})
+        return salida
 
-    def solicitar_recuperacion(self, correo: str) -> bool:
-        """Envía un código de un solo uso al correo de la cuenta. Devuelve si se envió, SOLO para el registro interno: la ruta responde
-        lo mismo exista o no la cuenta (no revela qué correos están registrados)."""
-        try:
-            normalizado = c.normalizar_correo(correo)
-        except c.DatosNoValidos:
-            return False
-        fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
-        if fila is None or not fila["activo"] or self._correo is None:
-            return False
-        ahora = self._reloj()
-        codigo = c.nuevo_codigo_recuperacion()
-        if not self._a.crear_recuperacion(fila["id"], c.hash_recuperacion(fila["id"], codigo), ahora + DURACION_RECUPERACION, ahora,
-                                          MAX_RECUPERACIONES_HORA):
-            return False  # demasiadas solicitudes seguidas para esta cuenta
-        texto = (f"Tu código para restablecer la contraseña de Tinotify es: {codigo}\n\nVale 15 minutos y se usa una sola vez. "
-                 "Si no lo pediste, ignora este mensaje: tu contraseña no cambia.")
-        html = ("<div style='font-family:Arial,sans-serif;color:#14213D;max-width:480px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
-                "<p>Tu código para restablecer la contraseña es:</p>"
-                f"<p style='font-size:28px;font-weight:700;letter-spacing:3px;margin:12px 0'>{codigo}</p>"
-                "<p>Vale 15 minutos y se usa una sola vez. Si no lo pediste, ignora este mensaje: tu contraseña no cambia.</p></div>")
-        return self._correo.enviar(normalizado, "Tu código para restablecer la contraseña de Tinotify", texto, html)
+    def _existente(self, objetivo: str, quien: str | None, propia_permitida=False):
+        if self._a.usuario_por_id(objetivo) is None:
+            raise UsuarioNoEncontrado
+        if quien is not None and quien == objetivo and not propia_permitida:
+            raise AccionNoPermitida
 
-    def restablecer_clave(self, correo: str, codigo: str, nueva: str) -> None:
-        """Cambia la contraseña con un código válido, cierra TODAS las sesiones y quita el bloqueo por intentos."""
-        try:
-            normalizado = c.normalizar_correo(correo)
-        except c.DatosNoValidos:
-            raise CodigoNoValido from None
-        c.validar_clave(nueva, normalizado)
-        fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
-        if fila is None or not fila["activo"]:
-            raise CodigoNoValido
-        ahora = self._reloj()
-        if not self._a.consumir_recuperacion(fila["id"], c.hash_recuperacion(fila["id"], codigo), ahora):
-            raise CodigoNoValido
-        self._a.cambiar_pass(fila["id"], c.hash_clave(nueva, n=self._n))
-        self._a.revocar_todas(fila["id"], ahora)
-        self._a.limpiar_fallos(fila["id"])
+    def fijar_activo(self, objetivo: str, activo: bool, quien: str | None) -> None:
+        self._existente(objetivo, quien)
+        self._a.fijar_activo(objetivo, activo)
+        if not activo:
+            self._a.revocar_todas(objetivo, self._reloj())  # una cuenta suspendida pierde todas sus sesiones
 
-    # --- sesiones ------------------------------------------------------------------------------------------------
+    def fijar_admin(self, objetivo: str, es_admin: bool, quien: str | None) -> None:
+        self._existente(objetivo, quien)
+        self._a.fijar_admin(objetivo, es_admin)
+
+    def borrar_datos(self, objetivo: str, quien: str | None) -> None:
+        """Quita las credenciales de SIGAC y todo el seguimiento de ese usuario; su cuenta sigue existiendo. Sobre uno mismo sí se permite."""
+        self._existente(objetivo, quien, propia_permitida=True)
+        self._a.borrar_datos_de(objetivo)
+
+    def eliminar_usuario(self, objetivo: str, quien: str | None) -> None:
+        self._existente(objetivo, quien)
+        self._a.borrar_usuario(objetivo)
+
+    # --- sesiones ---------------------------------------------------------------------------------------------------
     def autenticar(self, token: str | None) -> Usuario | None:
         if not token or not token.startswith("tn_") or len(token) > 200:
             return None
@@ -166,18 +209,14 @@ class ServicioCuentas:
     def cerrar_todas(self, usuario_id: str) -> None:
         self._a.revocar_todas(usuario_id, self._reloj())
 
-    # --- cuenta --------------------------------------------------------------------------------------------------
-    def _confirmar_clave(self, usuario_id: str, clave: str) -> None:
-        fila = self._a.usuario_por_id(usuario_id)
-        if fila is None or not c.verificar_clave(clave, fila["pass_hash"]):
-            raise CredencialesIncorrectas
-
-    def cambiar_clave(self, usuario_id: str, actual: str, nueva: str, token_actual: str) -> None:
-        self._confirmar_clave(usuario_id, actual)
-        c.validar_clave(nueva)
-        self._a.cambiar_pass(usuario_id, c.hash_clave(nueva, n=self._n))
-        self._a.revocar_todas_menos(usuario_id, c.sha256_hex(token_actual), self._reloj())  # el resto de dispositivos pierde acceso
-
-    def eliminar_cuenta(self, usuario_id: str, clave: str) -> None:
-        self._confirmar_clave(usuario_id, clave)
-        self._a.borrar_usuario(usuario_id)  # sesiones en cascada; los datos por usuario se borran en la fase 2
+    # --- cuenta --------------------------------------------------------------------------------------------------------
+    def eliminar_cuenta(self, usuario_id: str, correo: str) -> None:
+        """Borra la cuenta y todos sus datos. Para evitar un toque accidental hay que escribir el correo de la cuenta."""
+        try:
+            ref = c.correo_ref(self._llave, c.normalizar_correo(correo))
+        except c.DatosNoValidos:
+            raise ConfirmacionIncorrecta from None
+        fila = self._a.usuario_por_correo_ref(ref)
+        if fila is None or fila["id"] != usuario_id:
+            raise ConfirmacionIncorrecta
+        self._a.borrar_usuario(usuario_id)  # sesiones en cascada, igual que los datos del seguimiento
