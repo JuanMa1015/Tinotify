@@ -19,7 +19,7 @@ test('la próxima revisión respeta 7:30, 12:30 y 18:30 de Bogotá', () => {
 
 test('el resumen traduce cada resultado y avisa cuando hace falta atención', () => {
   const base = { credenciales_guardadas: true, expedientes_en_estado: 15, avisos_pendientes: 0 };
-  const con = (resultado: string) => resumenDeEstado({ ...base, ultima_ejecucion: { resultado, inicio: '2026-11-17T17:30:00Z', fin: null } });
+  const con = (resultado: string) => resumenDeEstado({ ...base, ultima_ejecucion: { resultado, inicio: '2026-11-17T17:30:00Z', fin: null } }, new Date('2026-11-17T18:00:00Z'));
   assert.equal(con('ok').titulo, 'Todo al día');
   assert.equal(con('ok').requiereAtencion, false);
   assert.equal(con('error_acceso').titulo, 'Actualiza tu clave');
@@ -147,4 +147,20 @@ test('el saludo usa el primer nombre con inicial mayúscula', () => {
   assert.equal(primerNombre('  ñandú  lópez '), 'Ñandú');
   assert.equal(primerNombre(''), '');
   assert.equal(primerNombre(null), '');
+});
+
+
+import { ultimaProgramada } from '../src/revisiones.ts';
+
+test('una revisión programada que no se hizo se señala como atrasada (solo en Inicio)', () => {
+  assert.equal(ultimaProgramada(new Date('2026-11-17T18:00:00Z')).etiqueta, '12:30');
+  assert.equal(ultimaProgramada(new Date('2026-11-17T05:00:00Z')).etiqueta, '18:30');  // 00:00 de Bogotá: la del día anterior
+  const base = { credenciales_guardadas: true, expedientes_en_estado: 15, avisos_pendientes: 0 };
+  const estado = (inicio: string) => ({ ...base, ultima_ejecucion: { resultado: 'ok', inicio, fin: null } });
+  const ahora = new Date('2026-11-17T19:30:00Z');  // 14:30 en Bogotá: la de las 12:30 lleva 2 h de retraso
+  assert.equal(resumenDeEstado(estado('2026-11-17T12:30:00Z'), ahora, true).titulo, 'Revisión atrasada');
+  assert.match(resumenDeEstado(estado('2026-11-17T12:30:00Z'), ahora, true).detalle, /12:30/);
+  assert.equal(resumenDeEstado(estado('2026-11-17T17:31:00Z'), ahora, true).titulo, 'Todo al día');   // ya corrió la de las 12:30
+  assert.equal(resumenDeEstado(estado('2026-11-17T12:30:00Z'), ahora).titulo, 'Todo al día');          // el historial no se marca como atrasado
+  assert.equal(resumenDeEstado(estado('2026-11-17T12:30:00Z'), new Date('2026-11-17T18:00:00Z'), true).titulo, 'Todo al día');  // dentro de la gracia
 });

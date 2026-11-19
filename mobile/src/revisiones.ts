@@ -14,6 +14,20 @@ export function proximaRevision(ahora: Date): { fecha: Date; etiqueta: string } 
   throw new Error('inalcanzable');
 }
 
+/** La revisión programada más reciente que ya debió ocurrir (7:30, 12:30 o 18:30 de Bogotá) y su etiqueta. */
+export function ultimaProgramada(ahora: Date): { fecha: Date; etiqueta: string } {
+  for (let dia = 0; dia >= -1; dia--) {
+    for (let i = HORAS_UTC.length - 1; i >= 0; i--) {
+      const [h, m] = HORAS_UTC[i];
+      const fecha = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate() + dia, h, m));
+      if (fecha.getTime() <= ahora.getTime()) return { fecha, etiqueta: ETIQUETAS_BOGOTA[i] };
+    }
+  }
+  throw new Error('inalcanzable');
+}
+
+const MS_GRACIA = 90 * 60 * 1000;  // GitHub puede retrasar el cron unos minutos; pasada hora y media se considera atrasada
+
 export type EstadoMonitor = {
   credenciales_guardadas: boolean;
   expedientes_en_estado: number;
@@ -31,7 +45,7 @@ const CODIGOS: Record<string, string> = {
   interrumpida: 'La revisión se interrumpió (por ejemplo, por un reinicio del servidor).',
 };
 
-export function resumenDeEstado(estado: EstadoMonitor, ahora: Date = new Date()): Resumen {
+export function resumenDeEstado(estado: EstadoMonitor, ahora: Date = new Date(), vigilarAtraso = false): Resumen {
   if (!estado.credenciales_guardadas) {
     return { titulo: 'Sin cuenta conectada', detalle: 'Conecta tu cuenta de SIGAC para empezar.', requiereAtencion: true };
   }
@@ -41,6 +55,12 @@ export function resumenDeEstado(estado: EstadoMonitor, ahora: Date = new Date())
     return ahora.getTime() - new Date(ultima.inicio).getTime() > MS_HUERFANA
       ? { titulo: 'Revisión interrumpida', detalle: CODIGOS.interrumpida, requiereAtencion: true }
       : { titulo: 'Revisión en curso', detalle: 'Aún no ha terminado.', requiereAtencion: false };
+  }
+  if (vigilarAtraso && (ultima.resultado === 'ok' || ultima.resultado === 'linea_base')) {
+    const programada = ultimaProgramada(ahora);
+    if (ahora.getTime() - programada.fecha.getTime() > MS_GRACIA && new Date(ultima.inicio).getTime() < programada.fecha.getTime() - 5 * 60 * 1000) {
+      return { titulo: 'Revisión atrasada', detalle: `La revisión de las ${programada.etiqueta} no se ha hecho. Se reintentará en la próxima; si persiste, avisa a quien administra Tinotify.`, requiereAtencion: true };
+    }
   }
   if ((ultima.resultado === 'ok' || ultima.resultado === 'linea_base') && ultima.codigo === 'casos_fallidos') {
     return { titulo: 'Revisión parcial', detalle: CODIGOS.casos_fallidos, requiereAtencion: true };
