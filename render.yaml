@@ -20,7 +20,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.18"
+        value: "3.11.9"
       - key: TINOTIFY_RR_MODO
         value: remoto
       - key: TINOTIFY_RR_TLS

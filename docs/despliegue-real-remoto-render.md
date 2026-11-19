@@ -36,7 +36,7 @@ Servicio web `tinotify-api` (plan gratuito). El panel manda; [`render.yaml`](../
 | --- | --- |
 | Repositorio / rama | `JuanMa1015/Tinotify` · **`main`** |
 | Root Directory | `backend` |
-| Runtime | Python 3 (`PYTHON_VERSION=3.11.18`) |
+| Runtime | Python 3 (`PYTHON_VERSION=3.11.9`) |
 | Build Command | `python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check` |
 | Start Command | `python -m uvicorn tinotify.real_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers --no-access-log` |
 | Health Check Path | `/health` |
@@ -45,6 +45,8 @@ Servicio web `tinotify-api` (plan gratuito). El panel manda; [`render.yaml`](../
 
 Notas:
 - Un solo *worker*: el estado de sesión de SIGAC vive en memoria y solo debe haber un acceso a la vez.
+- Python **3.11.9**, igual que en el panel (`PYTHON_VERSION`). La lectura de las páginas de SIGAC se prueba con el comportamiento del lector HTML de los parches
+  3.11 antiguos y de los recientes, así que un cambio de parche no la rompe.
 - **No ligar el servicio a un Blueprint**: el `render.yaml` es una referencia, no la fuente de verdad.
 - El plan gratuito **duerme tras 15 minutos sin tráfico** (el primer acceso tarda hasta un minuto) y ofrece 750 horas al mes por espacio de
   trabajo. El flujo `mantener-despierto` lo mantiene despierto de 8:00 a 17:59 (hora de Bogotá), unas 300 horas al mes.
