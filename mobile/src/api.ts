@@ -63,6 +63,13 @@ export const obtenerEjecuciones = (token: string) => solicitar<{ ejecuciones: Ej
 export type Expediente = { id: string; numero: number; cliente: string; estado: string; novedades_no_vistas: number; nuevo: boolean; ultima_novedad: string | null };
 export const obtenerExpedientes = (token: string) => solicitar<{ expedientes: Expediente[] }>('/real/expedientes', token, { limiteMs: 90000 });
 export const marcarVistos = (token: string, id?: string) => solicitar<{ actualizados: number }>('/real/expedientes/vistos', token, { cuerpo: id ? { id } : {} });
+export type Novedad = {
+  id: string; expediente: string; numero: number; cliente: string; vista: boolean; detectada_en: string;
+  fecha: string; etapa: string; origen: string; destino: string; remitente: string; resumen: string; anexos: number;
+};
+export const obtenerNovedades = (token: string) => solicitar<{ novedades: Novedad[] }>('/real/novedades?limite=100', token, { limiteMs: 90000 });
+// Nombre de la persona en SIGAC (el servidor lo lee con tus credenciales guardadas; no lo almacena). Solo para el saludo.
+export const obtenerPerfil = (token: string) => solicitar<{ nombre: string | null }>('/real/perfil', token, { limiteMs: 150000 });
 export const enviarPrueba = (token: string) => solicitar<{ enviados: number; invalidos: number }>('/real/dispositivos/prueba', token, { cuerpo: {}, limiteMs: 60000 });
 
 export type Actuacion = {

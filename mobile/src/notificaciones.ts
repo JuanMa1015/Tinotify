@@ -28,8 +28,8 @@ export async function desactivarPush(tokenApp: string): Promise<void> {
 
 export const pushActivo = async (): Promise<boolean> => (await SecureStore.getItemAsync(CLAVE_FCM)) !== null;
 
-export type Pestana = 'inicio' | 'casos' | 'actividad' | 'ajustes';
-const PESTANAS: Pestana[] = ['inicio', 'casos', 'actividad', 'ajustes'];
+export type Pestana = 'inicio' | 'casos' | 'novedades' | 'actividad' | 'ajustes';
+const PESTANAS: Pestana[] = ['inicio', 'casos', 'novedades', 'actividad', 'ajustes'];
 
 export type Destino = { pestana: Pestana; expediente?: string };
 

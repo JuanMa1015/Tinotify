@@ -8,7 +8,7 @@ import { Bienvenida, Login, Registro } from './src/AuthPantallas';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
 import { cerrarSesionEnServidor, obtenerEstado } from './src/api';
-import { biometriaActiva, borrarCorreo, borrarToken, desbloquear, fijarBiometria, guardarCorreo, guardarToken, leerCorreo, leerToken } from './src/almacen';
+import { biometriaActiva, borrarCorreo, borrarNombres, borrarToken, desbloquear, fijarBiometria, guardarCorreo, guardarToken, leerCorreo, leerToken } from './src/almacen';
 import { esTokenDeUsuario } from './src/cuentas';
 import { destinoDeNotificacion, type Destino } from './src/notificaciones';
 import { colores } from './src/tema';
@@ -57,7 +57,7 @@ export default function App() {
   const salir = useCallback(async () => {
     const actual = token;
     if (actual && esTokenDeUsuario(actual)) { try { await cerrarSesionEnServidor(actual); } catch { /* la sesión caduca sola */ } }
-    await borrarToken(); await borrarCorreo(); await fijarBiometria(false);
+    await borrarToken(); await borrarCorreo(); await borrarNombres().catch(() => undefined); await fijarBiometria(false);
     setToken(undefined); setCorreo(undefined); setBiometria(false); setFase('bienvenida');
   }, [token]);
 

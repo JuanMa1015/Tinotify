@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Aviso, Boton, Etiqueta, Tarjeta, Titulo, type Icono } from './componentes';
+import { Aviso, Boton, Campo, Etiqueta, Tarjeta, Titulo, type Icono } from './componentes';
 import { ErrorApi, crearInvitacion, enviarPrueba, olvidarCredenciales } from './api';
 import { biometriaDisponible } from './almacen';
 import { URL_POLITICA, URL_TERMINOS } from './cuentas';
 import { activarPush, desactivarPush, pushActivo } from './notificaciones';
-import type { EstadoMonitor } from './revisiones';
+import { primerNombre, type EstadoMonitor } from './revisiones';
 import { colores, espacio, radios } from './tema';
 
 export type SeccionAjustes = 'cuenta' | 'sigac' | 'avisos' | 'seguridad' | 'privacidad' | 'acerca';
 
 type Props = {
-  token: string; usuario: boolean; correo?: string; estado?: EstadoMonitor; biometria: boolean; version: string;
+  token: string; usuario: boolean; correo?: string; nombre: string; nombreSigac: string; onNombre: (n: string) => void; estado?: EstadoMonitor; biometria: boolean; version: string;
   onBiometria: (activa: boolean) => Promise<void>; onSalir: () => Promise<void>;
   onReconectar: () => void; onCuenta: (c: 'cambiar' | 'eliminar') => void;
   seccion: SeccionAjustes | null; onSeccion: (s: SeccionAjustes | null) => void;
@@ -24,6 +24,8 @@ export default function Ajustes(p: Props) {
   const [error, setError] = useState('');
   const [push, setPush] = useState(false);
   const [hayBiometria, setHayBiometria] = useState(false);
+  const [borrador, setBorrador] = useState(p.nombre);
+  const [cambiando, setCambiando] = useState(false);
   useEffect(() => { void biometriaDisponible().then(setHayBiometria); void pushActivo().then(setPush); }, []);
 
   async function cambiarPush(activar: boolean) {
@@ -92,6 +94,19 @@ export default function Ajustes(p: Props) {
   if (p.seccion === 'cuenta') {
     return <>{volver}<Titulo texto="Mi cuenta" />
       {error !== '' && <Aviso texto={error} />}
+      <Tarjeta>
+        <Text style={s.fuerte}>¿Cómo te saludamos?</Text>
+        {p.nombreSigac !== '' && p.nombre === '' && !cambiando ? <>
+          <Text style={s.valor}>{primerNombre(p.nombreSigac)}</Text>
+          <Texto>Tomado de tu cuenta de SIGAC. Se guarda solo en este teléfono.</Texto>
+          <Boton texto="Cambiar" secundario icono="create-outline" onPress={() => { setBorrador(primerNombre(p.nombreSigac)); setCambiando(true); }} />
+        </> : <>
+          <Campo icono="happy-outline" etiqueta="Tu nombre (opcional)" valor={borrador} onCambio={setBorrador} palabras />
+          <Boton texto="Guardar nombre" secundario icono="checkmark-outline" desactivado={borrador.trim() === p.nombre}
+            onPress={() => { p.onNombre(borrador); setCambiando(false); }} />
+          <Texto>{`${p.nombreSigac !== '' ? 'Déjalo vacío para volver al nombre de SIGAC. ' : 'No pudimos leerlo de SIGAC. '}Se guarda solo en este teléfono y aparece en el saludo de Inicio.`}</Texto>
+        </>}
+      </Tarjeta>
       {p.usuario ? <>
         <Tarjeta>
           <Text style={s.etiquetaCampo}>Correo</Text>
@@ -158,11 +173,11 @@ export default function Ajustes(p: Props) {
     return <>{volver}<Titulo texto="Privacidad y datos" />
       <Tarjeta>
         <Text style={s.fuerte}>Qué guardamos</Text>
-        <Text style={s.cuerpo}>Tu usuario y clave de SIGAC, cifrados en el servidor; nunca en este teléfono. La lista de tus expedientes (radicado, nombre y estado), cifrada. Resúmenes cifrados para detectar cambios y conteos de cada revisión.</Text>
+        <Text style={s.cuerpo}>Tu usuario y clave de SIGAC, cifrados en el servidor; nunca en este teléfono. La lista de tus expedientes (radicado, nombre y estado), cifrada. Una ficha corta de cada actuación nueva (fecha, etapa y extracto), cifrada y por 90 días. Resúmenes cifrados para detectar cambios y conteos de cada revisión.</Text>
       </Tarjeta>
       <Tarjeta>
         <Text style={s.fuerte}>Qué no guardamos</Text>
-        <Text style={s.cuerpo}>El contenido de tus actuaciones: se lee de SIGAC cuando abres un expediente y no se almacena.</Text>
+        <Text style={s.cuerpo}>El historial completo ni los anexos de tus actuaciones: se leen de SIGAC cuando abres un expediente y no se almacenan.</Text>
       </Tarjeta>
       <Boton texto="Política de tratamiento de datos" secundario icono="open-outline" onPress={() => { void Linking.openURL(URL_POLITICA); }} />
       <View style={{ height: espacio.s }} />

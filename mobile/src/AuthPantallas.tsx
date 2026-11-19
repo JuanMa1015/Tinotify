@@ -83,7 +83,7 @@ export function Registro({ onListo, onVolver }: { onListo: (token: string, corre
 
   return <Marco>
     <Text accessibilityRole="header" style={s.titulo}>Crear cuenta</Text>
-    <Text style={s.nota}>Antes de empezar: guardamos tu usuario y clave de SIGAC cifrados en el servidor y entramos a SIGAC por ti tres veces al día. No guardamos el contenido de tus actuaciones; sí la lista de tus expedientes (radicado, nombre y estado), también cifrada. Puedes borrar todo cuando quieras.</Text>
+    <Text style={s.nota}>Antes de empezar: guardamos tu usuario y clave de SIGAC cifrados en el servidor y entramos a SIGAC por ti tres veces al día. No guardamos el historial de tus actuaciones; sí la lista de tus expedientes (radicado, nombre y estado) y, por 90 días, una ficha corta de cada actuación nueva, todo cifrado. Puedes borrar todo cuando quieras.</Text>
     <Tarjeta>
       <Campo icono="ticket-outline" etiqueta="Código de invitación" valor={invitacion} onCambio={setInvitacion} mayusculas />
       <Campo icono="mail-outline" etiqueta="Correo" valor={correo} onCambio={setCorreo} teclado="email-address" />

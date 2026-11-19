@@ -82,6 +82,17 @@ export function canalesDeAviso(aviso: EstadoAviso | null | undefined): Canal[] {
 
 
 const ZONA = 'America/Bogota';
+
+/** «MARIA JOSE PEREZ» (como lo escribe SIGAC) -> «Maria»: el primer nombre, con inicial mayúscula. */
+export function primerNombre(completo: string | null | undefined): string {
+  const primero = nombreParaSaludo(completo).split(' ')[0] ?? '';
+  return primero === '' ? '' : primero.charAt(0).toLocaleUpperCase('es') + primero.slice(1).toLocaleLowerCase('es');
+}
+
+/** Nombre para el saludo: sin espacios de más y como máximo 40 caracteres; vacío si no hay nada útil. */
+export function nombreParaSaludo(texto: string | null | undefined): string {
+  return (texto ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
+}
 const partes = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: ZONA, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 
 /** "Hoy, 1:33 a. m." · "Ayer, 12:30 p. m." · "15 nov, 7:30 a. m." (hora de Bogotá). */
@@ -133,9 +144,11 @@ export function parsearDescripcion(texto: string): Descripcion {
   }
 }
 
-export type Direccion = 'estudiante_asesor' | 'asesor_estudiante' | 'otra';
+export type Direccion = 'estudiante_asesor' | 'asesor_estudiante' | 'direccion' | 'otra';
+const rol = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
 export function tipoDireccion(origen: string, destino: string): Direccion {
-  const o = origen.trim().toLowerCase(), d = destino.trim().toLowerCase();
+  const o = rol(origen), d = rol(destino);
+  if (o.startsWith('direccion') || d.startsWith('direccion')) return 'direccion';  // actuaciones de la Dirección (con o sin tilde)
   if (o === 'estudiante' && d === 'asesor') return 'estudiante_asesor';
   if (o === 'asesor' && d === 'estudiante') return 'asesor_estudiante';
   return 'otra';
@@ -148,4 +161,26 @@ export function tonoDeEstado(estado: string): TonoEstado {
   if (e.includes('proceso')) return 'proceso';
   if (/(terminad|cerrad|finaliz|archivad)/.test(e)) return 'cerrado';
   return 'otro';
+}
+
+/** Agrupa por día de Bogotá: «Hoy», «Ayer» o «15 nov». */
+export function etiquetaDia(iso: string, ahora: Date = new Date()): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '--';
+  const dia = partes(d);
+  if (dia === partes(ahora)) return 'Hoy';
+  if (dia === partes(new Date(ahora.getTime() - 86400000))) return 'Ayer';
+  return new Intl.DateTimeFormat('es-CO', { timeZone: ZONA, day: 'numeric', month: 'short' }).format(d).replace('.', '').replace(' de ', ' ');
+}
+
+export type GrupoDia<T> = { dia: string; items: T[] };
+/** Agrupa elementos ya ordenados (lo más reciente primero) por el día de `detectada_en`. */
+export function agruparPorDia<T extends { detectada_en: string }>(items: T[], ahora: Date = new Date()): GrupoDia<T>[] {
+  const grupos: GrupoDia<T>[] = [];
+  for (const x of items) {
+    const dia = etiquetaDia(x.detectada_en, ahora);
+    const ultimo = grupos[grupos.length - 1];
+    if (ultimo && ultimo.dia === dia) ultimo.items.push(x); else grupos.push({ dia, items: [x] });
+  }
+  return grupos;
 }
