@@ -5,10 +5,10 @@ Estado: propuesta. Hoy el sistema es de un solo usuario (un token único, una fi
 ## Decisiones propuestas
 1. **Registro por invitación (decidido).** Solo se crea cuenta con un código de invitación generado por el administrador. Evita guardar credenciales de desconocidos y limita la carga sobre SIGAC. Registro abierto: se evalúa tras el ensayo.
 1b. **Identificador: solo el correo (decidido).** No se añade nombre de usuario: con pocos invitados no aporta, obliga a validar unicidad y a aceptar dos formas de entrar, y el correo ya hace falta para los avisos. Si más adelante hay muchos usuarios, se reevalúa.
-2. **Identidad de la app separada de SIGAC.** Cuenta Tinotify = correo + contraseña propia. Las credenciales de SIGAC son un dato aparte, guardado cifrado, por usuario.
-3. **Contraseña:** hash con scrypt (biblioteca estándar de Python), sal única y comparación en tiempo constante. Nunca se guarda en claro.
-4. **Sesiones por dispositivo:** token aleatorio de 256 bits; en la base solo su SHA-256. Caduca (30 días, renovable), se puede revocar uno a uno y todos al cambiar la contraseña.
-5. **Biometría:** desbloquea localmente el token guardado en el almacén seguro del teléfono; no sustituye la contraseña en el servidor. "Entrar con huella o rostro" es posible solo si ya hubo un login con contraseña en ese dispositivo.
+2. **Identidad de la app separada de SIGAC.** Cuenta Tinotify = correo verificado con un código de un solo uso (sin contraseña propia). Las credenciales de SIGAC son un dato aparte, guardado cifrado, por usuario.
+3. **Código de acceso:** de 8 caracteres sin ambiguos (~40 bits), 15 minutos, un solo uso y 5 intentos; en la base solo su SHA-256 ligado al usuario. El de registro (cuenta nueva) no se guarda: es un HMAC del correo y la invitación, válido entre 10 y 20 minutos.
+4. **Sesiones por dispositivo:** token aleatorio de 256 bits; en la base solo su SHA-256. Caduca (30 días), se puede revocar una a una, y una cuenta suspendida las pierde todas.
+5. **Biometría:** desbloquea localmente el token guardado en el almacén seguro del teléfono; la app la ofrece tras la primera entrada.
 6. **Consentimiento:** se registra por usuario (versión y fecha) antes de aceptar credenciales de SIGAC.
 
 ## Modelo de datos (esquema `tinotify_real`)
@@ -19,7 +19,7 @@ Estado: propuesta. Hoy el sistema es de un solo usuario (un token único, una fi
 - `caso_ref` y huellas con clave derivada **por usuario** (misma llave maestra + `usuario_id`), para que dos usuarios con el mismo expediente no se correlacionen.
 
 ## Endpoints nuevos
-`POST /auth/registro` (correo, contraseña, invitación, consentimiento) · `POST /auth/login` · `POST /auth/logout` · `POST /auth/cambiar-clave` · `DELETE /auth/cuenta` (borra todo) · `GET /auth/sesiones`.
+`POST /auth/registro/codigo` (correo, invitación) · `POST /auth/registro` (correo, código, invitación, consentimiento) · `POST /auth/entrar/codigo` (correo) · `POST /auth/entrar` (correo, código) · `POST /auth/logout` · `DELETE /auth/cuenta` (escribe el correo; borra todo) · `GET /auth/yo` · administración en `/admin/usuarios`.
 Los endpoints actuales `/real/*` pasan a requerir la sesión de usuario y a operar solo sobre sus datos. El token del monitor (GitHub Actions) sigue existiendo y ejecuta usuario por usuario.
 
 ## Ejecución del monitor

@@ -6,11 +6,11 @@ import uuid
 import pytest
 
 from tinotify.real_remoto import cuentas as c
+from backend.tests.helpers.correo_falso import CorreoFalso
 from tinotify.real_remoto.servicio_cuentas import (
-    CredencialesIncorrectas, CuentaBloqueada, RegistroNoValido, ServicioCuentas)
+    CodigoNoValido, ConfirmacionIncorrecta, RegistroNoValido, ServicioCuentas)
 
 LLAVE = b"k" * 32
-CLAVE = "una-clave-ficticia-1"
 CONSENT = "consentimiento-v1"
 
 
@@ -19,6 +19,10 @@ class AlmacenMemoria:
         self.usuarios, self.invitaciones, self.sesiones = {}, {}, {}
 
     def crear_invitacion(self, h, expira): self.invitaciones[h] = {"expira": expira, "usada": False}
+
+    def invitacion_vigente(self, h, ahora):
+        i = self.invitaciones.get(h)
+        return i is not None and not i["usada"] and i["expira"] > ahora
 
     def registrar_usuario(self, inv, ref, pass_hash, version, ahora, correo=None):
         i = self.invitaciones.get(inv)
@@ -36,8 +40,6 @@ class AlmacenMemoria:
 
     def usuario_por_correo_ref(self, ref): return next((dict(u) for u in self.usuarios.values() if u["ref"] == ref), None)
     def usuario_por_id(self, uid): return dict(self.usuarios[uid]) if uid in self.usuarios else None
-    def registrar_fallo(self, uid, n, hasta): self.usuarios[uid].update(intentos_fallidos=n, bloqueado_hasta=hasta)
-    def limpiar_fallos(self, uid): self.usuarios[uid].update(intentos_fallidos=0, bloqueado_hasta=None)
     def crear_sesion(self, uid, h, disp, expira): self.sesiones[h] = {"uid": uid, "expira": expira, "revocada": None}
 
     def usuario_por_token(self, h, ahora):
@@ -52,11 +54,17 @@ class AlmacenMemoria:
         for s in self.sesiones.values():
             if s["uid"] == uid: s["revocada"] = ahora
 
-    def revocar_todas_menos(self, uid, h, ahora):
-        for k, s in self.sesiones.items():
-            if s["uid"] == uid and k != h: s["revocada"] = ahora
+    def listar_usuarios(self):
+        return [{"id": u["id"], "activo": u["activo"], "es_admin": u["es_admin"], "desde": "2026-11-18T12:00:00+00:00", "correo": u.get("correo"),
+                 "con_credenciales": u["id"] in getattr(self, "con_datos", ()), "expedientes": 3 if u["id"] in getattr(self, "con_datos", ()) else 0,
+                 "ultima_resultado": None, "ultima_inicio": None} for u in self.usuarios.values()]
 
-    def cambiar_pass(self, uid, ph): self.usuarios[uid]["pass_hash"] = ph
+    def fijar_activo(self, uid, activo): self.usuarios[uid]["activo"] = activo
+    def fijar_admin(self, uid, valor): self.usuarios[uid]["es_admin"] = valor
+
+    def borrar_datos_de(self, uid):
+        self.__dict__.setdefault("borrados", []).append(uid)
+        if hasattr(self, "con_datos"): self.con_datos.discard(uid)
 
     def crear_recuperacion(self, uid, h, expira, ahora, maximo=3):
         filas = self.__dict__.setdefault("recuperaciones", [])
@@ -92,79 +100,125 @@ class Reloj:
 
 @pytest.fixture
 def mundo():
-    reloj, almacen = Reloj(), AlmacenMemoria()
-    return ServicioCuentas(almacen, LLAVE, reloj=reloj, n_scrypt=2**10), almacen, reloj
+    reloj, almacen, correo = Reloj(), AlmacenMemoria(), CorreoFalso()
+    return ServicioCuentas(almacen, LLAVE, reloj=reloj, llave_correo=b"c" * 32, correo=correo), almacen, reloj, correo
 
 
-def registrado(s, correo="persona@ejemplo.com"):
-    return s.registrar(correo, CLAVE, s.crear_invitacion(), CONSENT, "telefono")
+def registrado(mundo, correo_usuario="persona@ejemplo.com", invitacion=None):
+    s, _, _, correo = mundo
+    inv = invitacion or s.crear_invitacion()
+    assert s.solicitar_codigo_registro(correo_usuario, inv) == "enviado"
+    return s.registrar(correo_usuario, correo.codigo(), inv, CONSENT, "telefono")
 
 
-def test_registro_con_invitacion_crea_cuenta_y_sesion(mundo):
-    s, a, _ = mundo
-    token, usuario = registrado(s)
+def test_registro_con_codigo_del_correo_crea_cuenta_y_sesion(mundo):
+    s, a, _, correo = mundo
+    token, usuario = registrado(mundo)
     assert s.autenticar(token) == usuario
     guardado = next(iter(a.usuarios.values()))
-    assert guardado["ref"] != "persona@ejemplo.com" and CLAVE not in guardado["pass_hash"]  # nada en claro
+    assert guardado["ref"] != "persona@ejemplo.com" and "persona" not in guardado["pass_hash"]  # nada en claro
+    assert correo.enviados[0]["destino"] == "persona@ejemplo.com" and "10 minutos" in correo.enviados[0]["texto"]
+
+
+def test_el_codigo_de_registro_depende_del_correo_y_de_la_invitacion_y_vence(mundo):
+    s, _, reloj, correo = mundo
+    inv, otra = s.crear_invitacion(), s.crear_invitacion()
+    s.solicitar_codigo_registro("a@ejemplo.com", inv)
+    codigo = correo.codigo()
+    for correo_malo, inv_mala in (("b@ejemplo.com", inv), ("a@ejemplo.com", otra)):
+        with pytest.raises(RegistroNoValido):
+            s.registrar(correo_malo, codigo, inv_mala, CONSENT)
+    with pytest.raises(RegistroNoValido):
+        s.registrar("a@ejemplo.com", "AAAA-AAAA", inv, CONSENT)
+    reloj.avanzar(minutes=25)                                               # vale entre 10 y 20 minutos
+    with pytest.raises(RegistroNoValido):
+        s.registrar("a@ejemplo.com", codigo, inv, CONSENT)
+
+
+def test_pedir_el_codigo_de_registro_dice_que_pasa_y_no_consume_la_invitacion(mundo):
+    s, a, _, correo = mundo
+    inv = s.crear_invitacion()
+    assert s.solicitar_codigo_registro("no-es-correo", inv) == "correo_invalido"
+    assert s.solicitar_codigo_registro("a@ejemplo.com", "AAAA-AAAA-AAAA-AAAA") == "invitacion_invalida"
+    assert not correo.enviados
+    assert s.solicitar_codigo_registro("a@ejemplo.com", inv) == "enviado" and not any(i["usada"] for i in a.invitaciones.values())
+    registrado(mundo, "a@ejemplo.com", inv)
+    assert s.solicitar_codigo_registro("a@ejemplo.com", s.crear_invitacion()) == "ya_registrado"
+    assert ServicioCuentas(a, LLAVE, correo=CorreoFalso(motivo="http_401:x")).solicitar_codigo_registro("z@ejemplo.com", s.crear_invitacion()) == "fallo_envio"
+    assert ServicioCuentas(a, LLAVE).solicitar_codigo_registro("y@ejemplo.com", s.crear_invitacion()) == "fallo_envio"      # sin correo configurado
 
 
 def test_la_invitacion_sirve_una_sola_vez_y_vence(mundo):
-    s, _, reloj = mundo
+    s, _, reloj, correo = mundo
     inv = s.crear_invitacion()
-    s.registrar("a@ejemplo.com", CLAVE, inv, CONSENT)
+    registrado(mundo, "a@ejemplo.com", inv)
+    s.solicitar_codigo_registro("b@ejemplo.com", inv)                        # ya usada: no se puede ni pedir el código
+    assert len(correo.enviados) == 1
     with pytest.raises(RegistroNoValido):
-        s.registrar("b@ejemplo.com", CLAVE, inv, CONSENT)
+        s.registrar("b@ejemplo.com", c.codigo_registro(LLAVE, "b@ejemplo.com", inv, c.ventana_registro(reloj())), inv, CONSENT)
     vieja = s.crear_invitacion()
     reloj.avanzar(days=8)
-    with pytest.raises(RegistroNoValido):
-        s.registrar("c@ejemplo.com", CLAVE, vieja, CONSENT)
+    assert s.solicitar_codigo_registro("c@ejemplo.com", vieja) == "invitacion_invalida"
 
 
-def test_invitacion_falsa_o_correo_repetido_dan_el_mismo_error(mundo):
-    s, _, _ = mundo
-    registrado(s)
-    for correo, inv in (("otro@ejemplo.com", "AAAA-AAAA-AAAA-AAAA"), ("persona@ejemplo.com", s.crear_invitacion())):
-        with pytest.raises(RegistroNoValido):
-            s.registrar(correo, CLAVE, inv, CONSENT)
+def test_entrar_con_codigo_abre_sesion_y_el_codigo_sirve_una_vez(mundo):
+    s, _, _, correo = mundo
+    registrado(mundo)
+    assert s.solicitar_codigo_acceso(" Persona@Ejemplo.com ") == "enviado"
+    token, usuario = s.entrar("persona@ejemplo.com", correo.codigo(), "otro-telefono")
+    assert s.autenticar(token) == usuario
+    with pytest.raises(CodigoNoValido):
+        s.entrar("persona@ejemplo.com", correo.codigo(), "otro-telefono")
 
 
-def test_formato_invalido_se_rechaza_antes_de_tocar_la_invitacion(mundo):
-    s, a, _ = mundo
-    inv = s.crear_invitacion()
-    with pytest.raises(c.DatosNoValidos):
-        s.registrar("no-es-correo", CLAVE, inv, CONSENT)
-    with pytest.raises(c.DatosNoValidos):
-        s.registrar("ok@ejemplo.com", "corta", inv, CONSENT)
-    assert not any(i["usada"] for i in a.invitaciones.values())
+def test_pedir_acceso_dice_que_paso(mundo):
+    s, a, reloj, correo = mundo
+    registrado(mundo)
+    assert s.solicitar_codigo_acceso("nadie@ejemplo.com") == "no_registrado" and s.solicitar_codigo_acceso("basura") == "no_registrado"
+    estados = [s.solicitar_codigo_acceso("persona@ejemplo.com") for _ in range(5)]
+    assert estados == ["enviado"] * 3 + ["limite"] * 2
+    assert ServicioCuentas(a, LLAVE).solicitar_codigo_acceso("persona@ejemplo.com") == "fallo_envio"
 
 
-def test_login_correcto_e_incorrecto_son_indistinguibles_para_correo_inexistente(mundo):
-    s, _, _ = mundo
-    registrado(s)
-    token, _ = s.iniciar_sesion(" Persona@Ejemplo.com ", CLAVE, "otro-telefono")
-    assert s.autenticar(token)
-    for correo, clave in (("persona@ejemplo.com", "clave-mala-ficticia"), ("nadie@ejemplo.com", CLAVE), ("basura", CLAVE)):
-        with pytest.raises(CredencialesIncorrectas):
-            s.iniciar_sesion(correo, clave)
-
-
-def test_bloqueo_tras_cinco_fallos_y_se_libera_con_el_tiempo(mundo):
-    s, _, reloj = mundo
-    registrado(s)
+def test_un_codigo_equivocado_cinco_veces_lo_inutiliza_y_el_de_otra_cuenta_no_sirve(mundo):
+    s, _, _, correo = mundo
+    registrado(mundo)
+    registrado(mundo, "otra@ejemplo.com")
+    s.solicitar_codigo_acceso("persona@ejemplo.com")
+    bueno = correo.codigo()
+    with pytest.raises(CodigoNoValido):
+        s.entrar("otra@ejemplo.com", bueno)                                   # ligado a su cuenta
     for _ in range(5):
-        with pytest.raises(CredencialesIncorrectas):
-            s.iniciar_sesion("persona@ejemplo.com", "clave-mala-ficticia")
-    with pytest.raises(CuentaBloqueada) as e:
-        s.iniciar_sesion("persona@ejemplo.com", CLAVE)  # ni con la clave correcta mientras dure el bloqueo
-    assert e.value.espera_s > 0
+        with pytest.raises(CodigoNoValido):
+            s.entrar("persona@ejemplo.com", "AAAA-AAAA")
+    with pytest.raises(CodigoNoValido):
+        s.entrar("persona@ejemplo.com", bueno)
+
+
+def test_el_codigo_de_acceso_vence_a_los_quince_minutos(mundo):
+    s, _, reloj, correo = mundo
+    registrado(mundo)
+    s.solicitar_codigo_acceso("persona@ejemplo.com")
     reloj.avanzar(minutes=16)
-    assert s.autenticar(s.iniciar_sesion("persona@ejemplo.com", CLAVE)[0])
+    with pytest.raises(CodigoNoValido):
+        s.entrar("persona@ejemplo.com", correo.codigo())
+
+
+def test_una_cuenta_suspendida_no_entra(mundo):
+    s, a, _, correo = mundo
+    _, u = registrado(mundo)
+    s.solicitar_codigo_acceso("persona@ejemplo.com")
+    s.fijar_activo(u.id, False, None)
+    with pytest.raises(CodigoNoValido):
+        s.entrar("persona@ejemplo.com", correo.codigo())
+    assert s.solicitar_codigo_acceso("persona@ejemplo.com") == "no_registrado"
 
 
 def test_sesiones_expiran_y_se_revocan(mundo):
-    s, _, reloj = mundo
-    t1, u = registrado(s)
-    t2, _ = s.iniciar_sesion("persona@ejemplo.com", CLAVE)
+    s, _, reloj, correo = mundo
+    t1, u = registrado(mundo)
+    s.solicitar_codigo_acceso("persona@ejemplo.com")
+    t2, _ = s.entrar("persona@ejemplo.com", correo.codigo())
     s.cerrar_sesion(t1)
     assert s.autenticar(t1) is None and s.autenticar(t2) == u
     reloj.avanzar(days=31)
@@ -176,25 +230,13 @@ def test_tokens_invalidos_no_autentican(mundo, token):
     assert mundo[0].autenticar(token) is None
 
 
-def test_cambiar_clave_cierra_las_otras_sesiones(mundo):
-    s, _, _ = mundo
-    t1, u = registrado(s)
-    t2, _ = s.iniciar_sesion("persona@ejemplo.com", CLAVE)
-    with pytest.raises(CredencialesIncorrectas):
-        s.cambiar_clave(u.id, "no-es-la-actual", "otra-clave-ficticia-2", t1)
-    s.cambiar_clave(u.id, CLAVE, "otra-clave-ficticia-2", t1)
-    assert s.autenticar(t1) == u and s.autenticar(t2) is None
-    with pytest.raises(CredencialesIncorrectas):
-        s.iniciar_sesion("persona@ejemplo.com", CLAVE)
-    assert s.iniciar_sesion("persona@ejemplo.com", "otra-clave-ficticia-2")
-
-
-def test_eliminar_cuenta_exige_la_clave_y_borra_todo(mundo):
-    s, a, _ = mundo
-    t, u = registrado(s)
-    with pytest.raises(CredencialesIncorrectas):
-        s.eliminar_cuenta(u.id, "no-es-la-clave")
-    s.eliminar_cuenta(u.id, CLAVE)
+def test_eliminar_cuenta_exige_escribir_el_correo_y_borra_todo(mundo):
+    s, a, _, _ = mundo
+    t, u = registrado(mundo)
+    for mal in ("otra@ejemplo.com", "basura", ""):
+        with pytest.raises(ConfirmacionIncorrecta):
+            s.eliminar_cuenta(u.id, mal)
+    s.eliminar_cuenta(u.id, " Persona@Ejemplo.com ")
     assert not a.usuarios and not a.sesiones and s.autenticar(t) is None
 
 
@@ -203,11 +245,9 @@ def test_llave_corta_se_rechaza():
         ServicioCuentas(AlmacenMemoria(), b"corta")
 
 
-def test_el_correo_de_aviso_se_guarda_cifrado_y_se_descifra_solo_para_avisar():
-    a = AlmacenMemoria()
-    reloj = Reloj()
-    s = ServicioCuentas(a, LLAVE, reloj=reloj, n_scrypt=2**10, llave_correo=b"c" * 32)
-    token, usuario = s.registrar("Persona@Ejemplo.com", CLAVE, s.crear_invitacion(), CONSENT)
+def test_el_correo_de_aviso_se_guarda_cifrado_y_se_descifra_solo_para_avisar(mundo):
+    s, a, _, _ = mundo
+    _, usuario = registrado(mundo, "Persona@Ejemplo.com")
     nonce, cifrado = a.usuarios[usuario.id]["correo"]
     assert b"persona" not in cifrado and b"ejemplo" not in cifrado
     assert s.correo_de(usuario.id) == "persona@ejemplo.com"
@@ -217,7 +257,9 @@ def test_el_correo_de_aviso_se_guarda_cifrado_y_se_descifra_solo_para_avisar():
 
 
 def test_sin_llave_de_correo_el_registro_funciona_sin_guardar_correo():
-    a = AlmacenMemoria()
-    s = ServicioCuentas(a, LLAVE, reloj=Reloj(), n_scrypt=2**10)
-    _, usuario = s.registrar("persona@ejemplo.com", CLAVE, s.crear_invitacion(), CONSENT)
+    a, reloj, correo = AlmacenMemoria(), Reloj(), CorreoFalso()
+    s = ServicioCuentas(a, LLAVE, reloj=reloj, correo=correo)
+    inv = s.crear_invitacion()
+    s.solicitar_codigo_registro("persona@ejemplo.com", inv)
+    _, usuario = s.registrar("persona@ejemplo.com", correo.codigo(), inv, CONSENT)
     assert a.usuarios[usuario.id]["correo"] is None
