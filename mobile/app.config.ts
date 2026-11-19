@@ -14,6 +14,7 @@ const config: ExpoConfig = {
   android: {
     package: 'com.tinotify.app',
     allowBackup: false,
+    versionCode: Number(process.env.ANDROID_VERSION_CODE ?? 1),  // en las builds de GitHub Actions es el número de ejecución (siempre creciente)
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON,  // variable de tipo archivo en EAS; nunca en el repositorio
     adaptiveIcon: { foregroundImage: './assets/icon-foreground.png', backgroundColor: '#0C1D40' },
   },

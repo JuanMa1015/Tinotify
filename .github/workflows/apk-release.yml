@@ -1,0 +1,114 @@
+name: apk-release
+
+# Compila el APK de Android en la nube (no depende de ningún equipo personal ni de las builds de Expo) y lo adjunta al release de GitHub.
+#   - Al subir una etiqueta `vX.Y.Z`: compila y publica el APK en el release de esa etiqueta.
+#   - A mano (Run workflow): compila y deja el APK como artefacto descargable (5 días), sin publicar nada.
+# Necesita 5 secretos del repositorio (ver docs/lanzamiento.md): ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+# ANDROID_KEY_PASSWORD y GOOGLE_SERVICES_JSON.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # adjuntar el APK al release
+
+concurrency:
+  group: apk-release
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      EXPO_PUBLIC_API_URL: https://tinotify.onrender.com
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Comprobar los secretos de firma
+        env:
+          K1: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          K2: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          K3: ${{ secrets.ANDROID_KEY_ALIAS }}
+          K4: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          K5: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          faltan=""
+          [ -n "$K1" ] || faltan="$faltan ANDROID_KEYSTORE_BASE64"
+          [ -n "$K2" ] || faltan="$faltan ANDROID_KEYSTORE_PASSWORD"
+          [ -n "$K3" ] || faltan="$faltan ANDROID_KEY_ALIAS"
+          [ -n "$K4" ] || faltan="$faltan ANDROID_KEY_PASSWORD"
+          [ -n "$K5" ] || faltan="$faltan GOOGLE_SERVICES_JSON"
+          if [ -n "$faltan" ]; then echo "::error::Faltan secretos del repositorio:$faltan (ver docs/lanzamiento.md)"; exit 1; fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Revisar tipos y pruebas
+        run: npm run typecheck && npm test
+
+      - name: Preparar Firebase (solo el archivo de configuración, nunca en el repositorio)
+        env:
+          GOOGLE_SERVICES_CONTENIDO: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          printf '%s' "$GOOGLE_SERVICES_CONTENIDO" > "$RUNNER_TEMP/google-services.json"
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert any(c['client_info']['android_client_info']['package_name']=='com.tinotify.app' for c in d['client']), 'google-services.json no es de com.tinotify.app'" "$RUNNER_TEMP/google-services.json"
+          echo "GOOGLE_SERVICES_JSON=$RUNNER_TEMP/google-services.json" >> "$GITHUB_ENV"
+
+      - name: Generar el proyecto Android
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Compilar el APK
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease --no-daemon -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Firmar el APK con la clave de Tinotify
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/tinotify.jks"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          origen="$(ls android/app/build/outputs/apk/release/*.apk | head -1)"
+          mkdir -p "$GITHUB_WORKSPACE/salida"
+          destino="$GITHUB_WORKSPACE/salida/Tinotify-${GITHUB_REF_NAME//\//-}.apk"
+          "$apksigner" sign --ks "$RUNNER_TEMP/tinotify.jks" --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS --out "$destino" "$origen"
+          "$apksigner" verify --print-certs "$destino" | grep -v "DEBUG\|Android Debug" | head -3
+          if "$apksigner" verify --print-certs "$destino" | grep -qi "Android Debug"; then echo "::error::El APK quedó firmado con la clave de depuración"; exit 1; fi
+          sha256sum "$destino" | tee "$destino.sha256"
+          rm -f "$RUNNER_TEMP/tinotify.jks" "$RUNNER_TEMP/google-services.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tinotify-apk
+          path: salida/*
+          retention-days: 5
+
+      - name: Publicar en el release (solo con etiqueta)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --title "Tinotify $GITHUB_REF_NAME" --notes "Ver CHANGELOG. Instala el archivo .apk en tu teléfono Android (puede pedir permitir instalar desde esta fuente)."
+          fi
+          gh release upload "$GITHUB_REF_NAME" salida/* --clobber
