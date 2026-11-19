@@ -89,6 +89,11 @@ export const iniciarSesion = (correo: string, clave: string) =>
 export const cerrarSesionEnServidor = (token: string) => solicitar<{ cerrada: boolean }>('/auth/logout', token, { cuerpo: {} });
 export const cambiarClave = (token: string, actual: string, nueva: string) => solicitar<{ cambiada: boolean }>('/auth/cambiar-clave', token, { cuerpo: { actual, nueva } });
 export const eliminarCuenta = (token: string, clave: string) => solicitar<{ borrada: boolean }>('/auth/cuenta', token, { metodo: 'DELETE', cuerpo: { clave } });
+// Recuperar la contraseña: el servidor envía un código de un solo uso al correo (siempre responde igual, exista o no la cuenta).
+export const recuperacionDisponible = () => solicitar<{ disponible: boolean }>('/auth/recuperacion', undefined, { limiteMs: 60000 });
+export const solicitarRecuperacion = (correo: string) => solicitar<{ solicitado: boolean }>('/auth/recuperar', undefined, { cuerpo: { correo }, limiteMs: 60000 });
+export const restablecerClave = (correo: string, codigo: string, clave: string) =>
+  solicitar<{ restablecida: boolean }>('/auth/restablecer', undefined, { cuerpo: { correo, codigo, clave }, limiteMs: 60000 });
 export const crearInvitacion = (token: string) => solicitar<{ codigo: string; vigencia_dias: number }>('/auth/invitaciones', token, { cuerpo: {} });
 
 /** Baja un anexo a través del servidor (que lo pide a SIGAC con tus credenciales; no se guarda allí) y abre el menú para verlo o compartirlo. */

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Aviso, Boton, Campo, Tarjeta } from './componentes';
-import { ErrorApi, cambiarClave, eliminarCuenta, iniciarSesion, registrar } from './api';
+import { ErrorApi, cambiarClave, eliminarCuenta, iniciarSesion, recuperacionDisponible, registrar, restablecerClave, solicitarRecuperacion } from './api';
 import { URL_POLITICA, URL_TERMINOS, mensajeDeAuth, validarClave, validarCorreo, validarRegistro } from './cuentas';
 import { colores, espacio } from './tema';
 
@@ -28,8 +28,10 @@ export function Bienvenida({ onLogin, onRegistro, onPropietario }: { onLogin: ()
   </Marco>;
 }
 
-export function Login({ onListo, onVolver }: { onListo: (token: string, correo: string) => Promise<void>; onVolver: () => void }) {
+export function Login({ onListo, onVolver, onOlvide }: { onListo: (token: string, correo: string) => Promise<void>; onVolver: () => void; onOlvide: () => void }) {
   const [correo, setCorreo] = useState('');
+  const [puedeRecuperar, setPuedeRecuperar] = useState(false);
+  useEffect(() => { recuperacionDisponible().then(r => setPuedeRecuperar(r.disponible), () => undefined); }, []);
   const [clave, setClave] = useState('');
   const [ver, setVer] = useState(false);
   const [cargando, setCargando] = useState(false);
@@ -55,6 +57,59 @@ export function Login({ onListo, onVolver }: { onListo: (token: string, correo: 
       {error !== '' && <Aviso texto={error} />}
       <Boton texto="Entrar" icono="paw" onPress={() => { void enviar(); }} cargando={cargando} desactivado={correo.trim() === '' || clave === ''} />
     </Tarjeta>
+    {puedeRecuperar && <Text accessibilityRole="button" style={s.enlace} onPress={onOlvide}>¿Olvidaste tu contraseña?</Text>}
+    <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
+  </Marco>;
+}
+
+export function RecuperarClave({ onListo, onVolver }: { onListo: () => void; onVolver: () => void }) {
+  const [correo, setCorreo] = useState('');
+  const [codigo, setCodigo] = useState('');
+  const [nueva, setNueva] = useState('');
+  const [confirmar, setConfirmar] = useState('');
+  const [enviado, setEnviado] = useState(false);
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState('');
+
+  async function pedir() {
+    const falla = validarCorreo(correo);
+    if (falla) { setError(falla); return; }
+    setCargando(true); setError('');
+    try { await solicitarRecuperacion(correo.trim().toLowerCase()); setEnviado(true); }
+    catch (err) { setError(mensaje(err)); }
+    finally { setCargando(false); }
+  }
+
+  async function cambiar() {
+    const falla = validarClave(nueva, correo) ?? (nueva !== confirmar ? 'Las contraseñas no coinciden.' : null);
+    if (falla) { setError(falla); return; }
+    setCargando(true); setError('');
+    try { await restablecerClave(correo.trim().toLowerCase(), codigo.trim(), nueva); onListo(); }
+    catch (err) {
+      setError(err instanceof ErrorApi && err.estado === 400 ? 'El código no es válido o ya venció. Pide uno nuevo.' : mensaje(err));
+    } finally { setNueva(''); setConfirmar(''); setCargando(false); }
+  }
+
+  return <Marco>
+    <Text accessibilityRole="header" style={s.titulo}>Recuperar contraseña</Text>
+    {!enviado ? <>
+      <Text style={s.nota}>Escribe el correo de tu cuenta de Tinotify. Si está registrado, te enviamos un código de un solo uso que vale 15 minutos.</Text>
+      <Tarjeta>
+        <Campo icono="mail-outline" etiqueta="Correo" valor={correo} onCambio={setCorreo} teclado="email-address" />
+        {error !== '' && <Aviso texto={error} />}
+        <Boton texto="Enviar código" icono="mail-outline" onPress={() => { void pedir(); }} cargando={cargando} desactivado={correo.trim() === ''} />
+      </Tarjeta>
+    </> : <>
+      <Text style={s.nota}>Si el correo está registrado, te enviamos un código (revisa también la carpeta de spam). Escríbelo aquí con tu contraseña nueva. Al cambiarla se cierra la sesión en todos tus dispositivos.</Text>
+      <Tarjeta>
+        <Campo icono="keypad-outline" etiqueta="Código del correo" valor={codigo} onCambio={setCodigo} mayusculas />
+        <Campo icono="key-outline" etiqueta="Contraseña nueva" valor={nueva} onCambio={setNueva} secreto />
+        <Campo icono="key-outline" etiqueta="Repite la nueva" valor={confirmar} onCambio={setConfirmar} secreto />
+        {error !== '' && <Aviso texto={error} />}
+        <Boton texto="Cambiar contraseña" onPress={() => { void cambiar(); }} cargando={cargando} desactivado={codigo.trim() === '' || nueva === ''} />
+      </Tarjeta>
+      <Text accessibilityRole="button" style={s.enlace} onPress={() => { setEnviado(false); setCodigo(''); setError(''); }}>Pedir otro código</Text>
+    </>}
     <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
   </Marco>;
 }

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Alert, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import Acceso from './src/Acceso';
-import { Bienvenida, Login, Registro } from './src/AuthPantallas';
+import { Bienvenida, Login, RecuperarClave, Registro } from './src/AuthPantallas';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
 import { cerrarSesionEnServidor, obtenerEstado } from './src/api';
@@ -13,7 +13,7 @@ import { esTokenDeUsuario } from './src/cuentas';
 import { destinoDeNotificacion, type Destino } from './src/notificaciones';
 import { colores } from './src/tema';
 
-type Fase = 'cargando' | 'bloqueada' | 'bienvenida' | 'login' | 'registro' | 'propietario' | 'conectar' | 'principal';
+type Fase = 'cargando' | 'bloqueada' | 'bienvenida' | 'login' | 'recuperar' | 'registro' | 'propietario' | 'conectar' | 'principal';
 
 export default function App() {
   const [fase, setFase] = useState<Fase>('cargando');
@@ -75,7 +75,8 @@ export default function App() {
       <Boton texto="Desbloquear" icono="finger-print" onPress={() => { void intentarDesbloqueo(); }} />
     </View>}
     {fase === 'bienvenida' && <Bienvenida onLogin={() => setFase('login')} onRegistro={() => setFase('registro')} onPropietario={() => setFase('propietario')} />}
-    {fase === 'login' && <Login onListo={(t, c) => alAutenticar(t, false, c)} onVolver={() => setFase('bienvenida')} />}
+    {fase === 'login' && <Login onListo={(t, c) => alAutenticar(t, false, c)} onVolver={() => setFase('bienvenida')} onOlvide={() => setFase('recuperar')} />}
+    {fase === 'recuperar' && <RecuperarClave onListo={() => { setFase('login'); Alert.alert('Contraseña actualizada', 'Ya puedes iniciar sesión con la nueva.'); }} onVolver={() => setFase('login')} />}
     {fase === 'registro' && <Registro onListo={(t, c) => alAutenticar(t, true, c)} onVolver={() => setFase('bienvenida')} />}
     {fase === 'propietario' && <Acceso onListo={alConectarPropietario} onCancelar={() => setFase('bienvenida')} />}
     {fase === 'conectar' && token && <Acceso tokenFijo={token} titulo="Conecta tu cuenta de SIGAC" onListo={async () => setFase('principal')} onCancelar={() => setFase('principal')} />}

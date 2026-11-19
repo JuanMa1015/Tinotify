@@ -32,6 +32,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
   const [ejecuciones, setEjecuciones] = useState<Ejecucion[]>();
   const [expedientes, setExpedientes] = useState<Expediente[] | null>();  // null: el servidor aún no ofrece el listado
   const [novedades, setNovedades] = useState<Novedad[] | null>();  // null: el servidor aún no ofrece las novedades
+  const [novedadesFallo, setNovedadesFallo] = useState(false);
   const [nombre, setNombre] = useState('');
   useEffect(() => { void leerNombre().then(n => setNombre(nombreParaSaludo(n))).catch(() => undefined); }, []);
   const [nombreSigac, setNombreSigac] = useState('');
@@ -42,8 +43,9 @@ export default function Principal({ token, correo, biometria, version, onBiometr
       if (guardado?.nombre) { if (vivo) setNombreSigac(guardado.nombre); return; }
       if (guardado && Date.now() - guardado.intento < 86400000) return;
       let encontrado = '';
-      try { encontrado = nombreParaSaludo((await obtenerPerfil(token)).nombre); } catch { /* sin nombre: Ajustes ofrece escribirlo */ }
-      await guardarNombreSigac(encontrado, Date.now());
+      try { encontrado = nombreParaSaludo((await obtenerPerfil(token)).nombre); }
+      catch { return; }  // el servidor no respondió (arranque en frío, SIGAC ocupado o versión antigua): se reintenta en la próxima apertura
+      await guardarNombreSigac(encontrado, Date.now());  // SIGAC respondió sin nombre: no se insiste hasta mañana; Ajustes ofrece escribirlo
       if (vivo && encontrado) setNombreSigac(encontrado);
     })().catch(() => undefined);
     return () => { vivo = false; };
@@ -71,7 +73,8 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     setRefrescando(true);
     try {
       obtenerExpedientes(token).then(r => setExpedientes(r.expedientes), () => setExpedientes(prev => prev ?? null));
-      obtenerNovedades(token).then(r => setNovedades(r.novedades), () => setNovedades(prev => prev ?? null));
+      obtenerNovedades(token).then(r => { setNovedades(r.novedades); setNovedadesFallo(false); },
+        err => { if (err instanceof ErrorApi && err.estado === 404) setNovedades(prev => prev ?? null); else setNovedadesFallo(true); });
       const [e, x] = await Promise.all([obtenerEstado(token), obtenerEjecuciones(token).catch(() => ({ ejecuciones: [] as Ejecucion[] }))]);  // el historial es secundario: si falla, el resto sigue
       setEstado(e); setEjecuciones(x.ejecuciones); setError('');
     } catch (err) {
@@ -109,7 +112,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
       {pestana === 'inicio' && <Inicio estado={estado} nombre={nombre || primerNombre(nombreSigac)} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'novedades' && <Novedades novedades={novedades} expedientes={expedientes} token={token} onCambio={setNovedades} onExpedientes={setExpedientes}
-        onError={setError} onAbrir={setAbierto} />}
+        onError={setError} onAbrir={setAbierto} fallo={novedadesFallo} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
       {pestana === 'ajustes' && <Ajustes token={token} usuario={usuario} correo={correo} estado={estado} biometria={biometria} version={version}
         nombre={nombre} nombreSigac={nombreSigac} onNombre={n => { const limpio = nombreParaSaludo(n); setNombre(limpio); void guardarNombre(limpio); }}
@@ -121,7 +124,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
 }
 
 function Inicio({ estado, nombre, onConectar }: { estado?: EstadoMonitor; nombre: string; onConectar: () => void }) {
-  const resumen = estado ? resumenDeEstado(estado) : undefined;
+  const resumen = estado ? resumenDeEstado(estado, new Date(), true) : undefined;
   const proxima = proximaRevision(new Date());
   return <>
     <Titulo texto={saludo(nombre)} subtitulo="Resumen del seguimiento de tu cuenta de SIGAC" />
@@ -217,8 +220,8 @@ function Casos({ estado, expedientes, token, onCambio, onError, onAbrir }: { est
   </>;
 }
 
-function Novedades({ novedades, expedientes, token, onCambio, onExpedientes, onError, onAbrir }: {
-  novedades?: Novedad[] | null; expedientes?: Expediente[] | null; token: string; onCambio: (n: Novedad[]) => void;
+function Novedades({ novedades, expedientes, token, onCambio, onExpedientes, onError, onAbrir, fallo }: {
+  fallo: boolean; novedades?: Novedad[] | null; expedientes?: Expediente[] | null; token: string; onCambio: (n: Novedad[]) => void;
   onExpedientes: (e: Expediente[]) => void; onError: (m: string) => void; onAbrir: (x: Expediente) => void;
 }) {
   const lista = novedades ?? [];
@@ -242,7 +245,8 @@ function Novedades({ novedades, expedientes, token, onCambio, onExpedientes, onE
 
   return <>
     <Titulo texto="Novedades" subtitulo="Solo las actuaciones nuevas, de la más reciente a la más antigua" />
-    {novedades === undefined ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /></> :
+    {novedades === undefined && fallo ? <Tarjeta><Text style={s.cuerpo}>No se pudieron cargar las novedades (el servidor puede estar despertando). Desliza hacia abajo para reintentar.</Text></Tarjeta> :
+      novedades === undefined ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /></> :
       novedades === null ? <Tarjeta><Text style={s.cuerpo}>Las novedades aún no están disponibles en el servidor. Tinotify sigue vigilando tu cuenta y te avisará de lo nuevo.</Text></Tarjeta> : <>
       {sinVer > 0 && <View style={s.barraVistos}>
         <Text style={[s.cuerpo, { flex: 1 }]}>{sinVer === 1 ? '1 novedad sin ver' : `${sinVer} novedades sin ver`}</Text>
