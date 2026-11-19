@@ -12,9 +12,9 @@ import { colores, espacio, radios } from './tema';
 export type SeccionAjustes = 'cuenta' | 'sigac' | 'avisos' | 'seguridad' | 'privacidad' | 'acerca';
 
 type Props = {
-  token: string; usuario: boolean; correo?: string; nombre: string; nombreSigac: string; onNombre: (n: string) => void; estado?: EstadoMonitor; biometria: boolean; version: string;
+  token: string; usuario: boolean; admin: boolean; correo?: string; nombre: string; nombreSigac: string; onNombre: (n: string) => void; estado?: EstadoMonitor; biometria: boolean; version: string;
   onBiometria: (activa: boolean) => Promise<void>; onSalir: () => Promise<void>;
-  onReconectar: () => void; onCuenta: (c: 'cambiar' | 'eliminar') => void;
+  onReconectar: () => void; onCuenta: (c: 'eliminar') => void;
   seccion: SeccionAjustes | null; onSeccion: (s: SeccionAjustes | null) => void;
 };
 
@@ -85,8 +85,8 @@ export default function Ajustes(p: Props) {
       {error !== '' && <Aviso texto={error} />}
       <Tarjeta estilo={{ padding: 0, overflow: 'hidden' }}>
         <FilaNav icono="person-outline" titulo="Mi cuenta" detalle={p.usuario ? 'Contraseña y sesión' : 'Invitaciones y sesión'} onPress={() => p.onSeccion('cuenta')} />
-        <FilaNav icono="link-outline" titulo="Conexión con SIGAC" detalle={conectada === undefined ? 'Cargando…' : conectada ? 'Conectada' : 'Sin conectar'} alerta={conectada === false} onPress={() => p.onSeccion('sigac')} />
-        <FilaNav icono="notifications-outline" titulo="Notificaciones" detalle={push ? 'Activadas en este teléfono' : 'Desactivadas'} onPress={() => p.onSeccion('avisos')} />
+        {!p.admin && <FilaNav icono="link-outline" titulo="Conexión con SIGAC" detalle={conectada === undefined ? 'Cargando…' : conectada ? 'Conectada' : 'Sin conectar'} alerta={conectada === false} onPress={() => p.onSeccion('sigac')} />}
+        {!p.admin && <FilaNav icono="notifications-outline" titulo="Notificaciones" detalle={push ? 'Activadas en este teléfono' : 'Desactivadas'} onPress={() => p.onSeccion('avisos')} />}
         <FilaNav icono="shield-checkmark-outline" titulo="Seguridad" detalle={p.biometria ? 'Huella o rostro al abrir' : 'Sin desbloqueo biométrico'} onPress={() => p.onSeccion('seguridad')} />
         <FilaNav icono="document-text-outline" titulo="Privacidad y datos" detalle="Qué guardamos y tus derechos" onPress={() => p.onSeccion('privacidad')} />
         <FilaNav icono="information-circle-outline" titulo="Acerca de Tinotify" detalle={`Versión ${p.version}`} ultima onPress={() => p.onSeccion('acerca')} />
@@ -120,8 +120,6 @@ export default function Ajustes(p: Props) {
           <Text style={s.etiquetaCampo}>Correo</Text>
           <Text style={s.valor}>{p.correo ?? '—'}</Text>
         </Tarjeta>
-        <Boton texto="Cambiar contraseña" secundario icono="key-outline" onPress={() => p.onCuenta('cambiar')} />
-        <Texto>Al cambiarla se cierra la sesión en tus otros dispositivos.</Texto>
         <Zona titulo="Zona de riesgo">
           <Boton texto="Eliminar mi cuenta" peligro icono="trash-outline" onPress={() => p.onCuenta('eliminar')} />
           <Texto>Borra tu cuenta y todos tus datos. No se puede deshacer.</Texto>

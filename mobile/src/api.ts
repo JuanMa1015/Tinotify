@@ -80,23 +80,32 @@ export type Actuacion = {
 export const obtenerActuaciones = (token: string, id: string) =>
   solicitar<{ actuaciones: Actuacion[] }>(`/real/expedientes/${id}/actuaciones`, token, { limiteMs: 150000 });
 
-// --- Cuentas de usuario (registro por invitación) ---
+// --- Cuentas de usuario (registro por invitación, entrada con código por correo; sin contraseñas) ---
 export type SesionNueva = { token: string; usuario: string };
-export const registrar = (d: { invitacion: string; correo: string; clave: string }) =>
+export type EstadoCodigo = 'enviado' | 'no_registrado' | 'limite' | 'fallo_envio' | 'invitacion_invalida' | 'ya_registrado' | 'correo_invalido';
+export const pedirCodigoRegistro = (correo: string, invitacion: string) =>
+  solicitar<{ estado: EstadoCodigo }>('/auth/registro/codigo', undefined, { cuerpo: { correo, invitacion }, limiteMs: 60000 });
+export const registrar = (d: { invitacion: string; correo: string; codigo: string }) =>
   solicitar<SesionNueva>('/auth/registro', undefined, { cuerpo: { ...d, consentimiento: CONSENTIMIENTO, dispositivo: 'Android' }, limiteMs: 60000 });
-export const iniciarSesion = (correo: string, clave: string) =>
-  solicitar<SesionNueva>('/auth/login', undefined, { cuerpo: { correo, clave, dispositivo: 'Android' }, limiteMs: 60000 });
+export const pedirCodigoAcceso = (correo: string) =>
+  solicitar<{ estado: EstadoCodigo }>('/auth/entrar/codigo', undefined, { cuerpo: { correo }, limiteMs: 60000 });
+export const entrar = (correo: string, codigo: string) =>
+  solicitar<SesionNueva>('/auth/entrar', undefined, { cuerpo: { correo, codigo, dispositivo: 'Android' }, limiteMs: 60000 });
 export const cerrarSesionEnServidor = (token: string) => solicitar<{ cerrada: boolean }>('/auth/logout', token, { cuerpo: {} });
-export const cambiarClave = (token: string, actual: string, nueva: string) => solicitar<{ cambiada: boolean }>('/auth/cambiar-clave', token, { cuerpo: { actual, nueva } });
-export const eliminarCuenta = (token: string, clave: string) => solicitar<{ borrada: boolean }>('/auth/cuenta', token, { metodo: 'DELETE', cuerpo: { clave } });
-// Recuperar la contraseña: el servidor envía un código de un solo uso al correo (siempre responde igual, exista o no la cuenta).
-export const recuperacionDisponible = () => solicitar<{ disponible: boolean }>('/auth/recuperacion', undefined, { limiteMs: 60000 });
-export type EstadoRecuperacion = 'enviado' | 'no_registrado' | 'limite' | 'fallo_envio';
-export const solicitarRecuperacion = (correo: string) => solicitar<{ estado: EstadoRecuperacion }>('/auth/recuperar', undefined, { cuerpo: { correo }, limiteMs: 60000 });
+export const eliminarCuenta = (token: string, correo: string) => solicitar<{ borrada: boolean }>('/auth/cuenta', token, { metodo: 'DELETE', cuerpo: { correo } });
 // Solo el propietario: manda un correo de prueba y, si falla, dice el motivo que da el proveedor.
 export const probarCorreo = (token: string) => solicitar<{ enviado: boolean; motivo: string | null }>('/auth/correo/prueba', token, { cuerpo: {}, limiteMs: 60000 });
-export const restablecerClave = (correo: string, codigo: string, clave: string) =>
-  solicitar<{ restablecida: boolean }>('/auth/restablecer', undefined, { cuerpo: { correo, codigo, clave }, limiteMs: 60000 });
+// --- Administración (propietario o cuenta administradora) ---
+export type UsuarioAdmin = {
+  id: string; activo: boolean; es_admin: boolean; desde: string; correo: string | null; con_credenciales: boolean; expedientes: number;
+  ultima_resultado: string | null; ultima_inicio: string | null;
+};
+export const obtenerYo = (token: string) => solicitar<{ usuario: string; admin: boolean }>('/auth/yo', token);
+export const adminUsuarios = (token: string) => solicitar<{ usuarios: UsuarioAdmin[]; yo: string | null }>('/admin/usuarios', token, { limiteMs: 60000 });
+export const adminActivo = (token: string, id: string, activo: boolean) => solicitar<{ activo: boolean }>(`/admin/usuarios/${id}/activo`, token, { cuerpo: { activo } });
+export const adminRol = (token: string, id: string, admin: boolean) => solicitar<{ admin: boolean }>(`/admin/usuarios/${id}/admin`, token, { cuerpo: { admin } });
+export const adminBorrarDatos = (token: string, id: string) => solicitar<{ borrados: boolean }>(`/admin/usuarios/${id}/datos`, token, { metodo: 'DELETE' });
+export const adminEliminar = (token: string, id: string) => solicitar<{ eliminada: boolean }>(`/admin/usuarios/${id}`, token, { metodo: 'DELETE' });
 export const crearInvitacion = (token: string) => solicitar<{ codigo: string; vigencia_dias: number }>('/auth/invitaciones', token, { cuerpo: {} });
 
 /** Baja un anexo a través del servidor (que lo pide a SIGAC con tus credenciales; no se guarda allí) y abre el menú para verlo o compartirlo. */
