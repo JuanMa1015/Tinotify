@@ -22,7 +22,7 @@ VARIABLES_MONITOR = {PREFIJO + x for x in (
 OBLIGATORIAS_MONITOR = {PREFIJO + x for x in ("PG_HOST", "PG_USER", "PG_PASSWORD", "PG_CA_FILE", "CLAVE_CIFRADO", "MONITOR_TOKEN")}
 VARIABLES = {PREFIJO + x for x in (
     "MODO", "TOKEN", "TLS", "PROXIES_CONFIABLES", "ACREDITACION_FILE", "REFERENCIA_FILE", "TIPO", "TOTAL_CASOS",
-    "TTL_MIN", "MAX_LOGINS", "VENTANA_LOGIN_MIN", "FCM_CUENTA_SERVICIO", "CUENTAS")} | VARIABLES_MONITOR
+    "TTL_MIN", "MAX_LOGINS", "VENTANA_LOGIN_MIN", "FCM_CUENTA_SERVICIO", "CUENTAS", "BREVO_CLAVE", "BREVO_REMITENTE")} | VARIABLES_MONITOR
 _HOST_PG = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _USUARIO_PG = re.compile(r"^tinotify_real_login(\.[a-z0-9]{8,40})?$")
 
@@ -140,6 +140,7 @@ class Config:
     ventana_login_s: int = 900
     monitor: ConfigMonitor | None = None   # opcional: base de datos, llave de cifrado y token propios
     cuentas: bool = False   # opcional: rutas /auth (registro por invitación). Exige el monitor y la migración de cuentas aplicada
+    correo_api: tuple | None = field(repr=False, default=None)   # opcional: (clave de Brevo, remitente) para el código de recuperación; exige cuentas
     fcm_cuenta: Path | None = field(repr=False, default=None)   # opcional: cuenta de servicio de Firebase (push); exige el monitor
 
     def __repr__(self):
@@ -191,7 +192,22 @@ class Config:
             fcm = _archivo(fcm, "fcm_cuenta_ausente_o_invalida", maximo=100_000)
         else:
             fcm = None
-        return cls(modo=modo, token=token, tls=tls, proxies_confiables=proxies, tipo=tipo, total_casos=total,
+        clave_brevo, remitente_brevo = e.get(PREFIJO + "BREVO_CLAVE", ""), e.get(PREFIJO + "BREVO_REMITENTE", "")
+        correo_api = None
+        if clave_brevo or remitente_brevo:
+            if not (clave_brevo and remitente_brevo):
+                _rechazar("brevo_incompleto")
+            if cuentas != "1":
+                _rechazar("brevo_sin_cuentas")
+            from tinotify.real_remoto.correo_brevo import CorreoNoValido, validar_clave_api
+            from tinotify.real_remoto.cuentas import DatosNoValidos, normalizar_correo
+            try:
+                validar_clave_api(clave_brevo)
+                remitente_brevo = normalizar_correo(remitente_brevo)
+            except (CorreoNoValido, DatosNoValidos):
+                _rechazar("brevo_no_valido")
+            correo_api = (clave_brevo, remitente_brevo)
+        return cls(modo=modo, token=token, tls=tls, correo_api=correo_api, proxies_confiables=proxies, tipo=tipo, total_casos=total,
                    acreditacion=_archivo(e.get(PREFIJO + "ACREDITACION_FILE", ""), "acreditacion_ausente"),
                    referencia=_archivo(e.get(PREFIJO + "REFERENCIA_FILE", ""), "referencia_ausente"),
                    ttl_s=ttl, max_logins=max_logins, ventana_login_s=ventana, monitor=monitor, fcm_cuenta=fcm, cuentas=cuentas == "1")

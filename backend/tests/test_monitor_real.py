@@ -192,7 +192,7 @@ def huellas_del_simulado(textos):
 
 
 class Mundo:
-    def __init__(self, casos, *, sim_extra=None, almacen=None, llave=LLAVE, max_logins=30, con_monitor=True, fabrica=None, cuentas=None):
+    def __init__(self, casos, *, sim_extra=None, almacen=None, llave=LLAVE, max_logins=30, con_monitor=True, fabrica=None, cuentas=None, correo=None):
         self.sim = SigacSimulado(casos, **(sim_extra or {}))
         self.almacen = almacen or AlmacenMemoria()
         referencia, _ = referencia_de(huellas_del_simulado(BASE_101))
@@ -200,7 +200,7 @@ class Mundo:
         self.historial = HistorialTemporal()
         self.app = crear_app(config(max_logins=max_logins, monitor=monitor, **({'cuentas': True} if cuentas is not None else {})), politica=politica_de_prueba(), referencia=referencia,
                              historial=self.historial, fabrica_cliente=(fabrica(self.sim) if fabrica else self.sim.cliente), clave_acreditacion=CLAVE_TEST,
-                             almacen=self.almacen, almacen_cuentas=cuentas)
+                             almacen=self.almacen, almacen_cuentas=cuentas, correo_cliente=correo)
         self.c = cliente_http(self.app)
 
     def guardar_credenciales(self):

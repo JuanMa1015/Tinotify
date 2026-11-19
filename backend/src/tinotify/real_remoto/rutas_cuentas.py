@@ -15,7 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from tinotify.real_remoto import cuentas as c
 from tinotify.real_remoto.almacen import AlmacenIncompatible, AlmacenNoDisponible
-from tinotify.real_remoto.servicio_cuentas import CredencialesIncorrectas, CuentaBloqueada, RegistroNoValido
+from tinotify.real_remoto.servicio_cuentas import CodigoNoValido, CredencialesIncorrectas, CuentaBloqueada, RegistroNoValido
 
 registro = logging.getLogger("tinotify.real_remoto")
 CONSENTIMIENTO_VIGENTE = "consentimiento-v1"
@@ -61,6 +61,18 @@ class CambioClave(BaseModel):
     nueva: Clave
 
 
+class Recuperar(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    correo: Correo
+
+
+class Restablecer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    correo: Correo
+    codigo: Annotated[str, StringConstraints(min_length=4, max_length=20)]
+    clave: Clave
+
+
 class BorradoCuenta(BaseModel):
     model_config = ConfigDict(extra="forbid")
     clave: Clave
@@ -68,6 +80,7 @@ class BorradoCuenta(BaseModel):
 
 def registrar_cuentas(app: FastAPI, *, servicio, protegidas_app, reloj):
     limitador = Limitador(MAX_INTENTOS, VENTANA_S, reloj)
+    limitador_correos = Limitador(10, VENTANA_S, reloj)  # tope GLOBAL de correos de recuperación (cuota diaria del proveedor)
     bearer = HTTPBearer(auto_error=False)
 
     def sesion(credencial: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
@@ -113,6 +126,36 @@ def registrar_cuentas(app: FastAPI, *, servicio, protegidas_app, reloj):
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise sin_almacen() from None
         return {"token": token, "usuario": usuario.id}
+
+    @app.get("/auth/recuperacion")
+    async def recuperacion_disponible():
+        """¿Puede el servidor enviar códigos de recuperación? La app muestra «¿Olvidaste tu contraseña?» solo si sí."""
+        return {"disponible": servicio.recuperacion_disponible}
+
+    @app.post("/auth/recuperar")
+    async def recuperar(datos: Recuperar):
+        """Responde SIEMPRE lo mismo, exista o no la cuenta: no revela qué correos están registrados."""
+        limitar()
+        if not limitador_correos.permitir():
+            raise HTTPException(429, "Demasiadas solicitudes; espera unos minutos", headers={"Retry-After": "300"})
+        try:
+            await run_in_threadpool(servicio.solicitar_recuperacion, datos.correo)
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise sin_almacen() from None
+        return {"solicitado": True}
+
+    @app.post("/auth/restablecer")
+    async def restablecer(datos: Restablecer):
+        limitar()
+        try:
+            await run_in_threadpool(servicio.restablecer_clave, datos.correo, datos.codigo, datos.clave)
+        except c.DatosNoValidos as error:
+            raise HTTPException(422, f"datos_no_validos:{error}") from None
+        except CodigoNoValido:
+            raise HTTPException(400, "El código no es válido o ya venció") from None
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise sin_almacen() from None
+        return {"restablecida": True}
 
     @app.get("/auth/yo")
     async def yo(actual: Annotated[tuple, Depends(sesion)]):
