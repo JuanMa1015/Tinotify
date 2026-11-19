@@ -119,9 +119,8 @@ def test_exige_el_token_valida_los_indices_y_no_cruza_cuentas(mundo):
     assert mundo.c.get(url(mundo, 0, 0)).status_code == 401
     assert mundo.c.get(f"/real/expedientes/{mundo.ref}/actuaciones/-1/anexos/0", headers=CAB).status_code == 422
     assert mundo.c.get(f"/real/expedientes/no-es-un-id/actuaciones/0/anexos/0", headers=CAB).status_code == 422
-    inv = mundo.c.post("/auth/invitaciones", headers=CAB).json()["codigo"]
-    t = mundo.c.post("/auth/registro", json={"correo": "a@ejemplo.com", "clave": "una-clave-ficticia-1", "invitacion": inv,
-                                             "consentimiento": "consentimiento-v1"}).json()["token"]
+    from backend.tests.test_rutas_cuentas import registrar
+    t = registrar(mundo, "a@ejemplo.com").json()["token"]
     assert mundo.c.get(url(mundo, 0, 0), headers={"Authorization": f"Bearer {t}"}).status_code == 404   # no ve el expediente de otra cuenta
 
 

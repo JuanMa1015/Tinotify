@@ -59,6 +59,12 @@ adm < "$RAIZ/supabase/propuestas/20261118050000_novedades_down.sql" || { echo "B
 echo "BAJA_NOVEDADES_OK"
 adm < "$RAIZ/supabase/propuestas/20261118050000_novedades.sql" || { echo "SEGUNDA_ALTA_NOVEDADES_FALLO"; exit 1; }
 echo "SEGUNDA_ALTA_NOVEDADES_OK"
+adm <"$RAIZ/supabase/propuestas/20261118070000_admin_usuarios.sql" || { echo "ALTA_ADMIN_FALLO"; exit 1; }
+echo "ALTA_ADMIN_OK"
+adm < "$RAIZ/supabase/propuestas/20261118070000_admin_usuarios_down.sql" || { echo "BAJA_ADMIN_FALLO"; exit 1; }
+echo "BAJA_ADMIN_OK"
+adm < "$RAIZ/supabase/propuestas/20261118070000_admin_usuarios.sql" || { echo "SEGUNDA_ALTA_ADMIN_FALLO"; exit 1; }
+echo "SEGUNDA_ALTA_ADMIN_OK"
 adm < "$RAIZ/supabase/propuestas/20261118060000_recuperacion_clave.sql" || { echo "ALTA_RECUPERACION_FALLO"; exit 1; }
 echo "ALTA_RECUPERACION_OK"
 adm < "$RAIZ/supabase/propuestas/20261118060000_recuperacion_clave_down.sql" || { echo "BAJA_RECUPERACION_FALLO"; exit 1; }

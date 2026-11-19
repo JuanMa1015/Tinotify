@@ -9,10 +9,10 @@ import threading
 
 import pytest
 
-from tinotify.real_remoto.servicio_cuentas import (
-    CredencialesIncorrectas, RegistroNoValido, ServicioCuentas)
+from backend.tests.helpers.correo_falso import CorreoFalso
+from tinotify.real_remoto.servicio_cuentas import CodigoNoValido, RegistroNoValido, ServicioCuentas
 
-CLAVE = "una-clave-ficticia-1"
+CONSENT = "consentimiento-v1"
 
 
 def _entorno():
@@ -31,39 +31,51 @@ def mundo():
                    e["TINOTIFY_TEST_PG_PASSWORD"], None, tls=False)
     admin = psycopg.connect(host=cfg.host, port=cfg.puerto, dbname="postgres", user=e["TINOTIFY_TEST_PG_ADMIN_USER"],
                             password=e["TINOTIFY_TEST_PG_ADMIN_PASSWORD"], autocommit=True)
-    admin.execute("TRUNCATE tinotify_real.sesiones, tinotify_real.invitaciones, tinotify_real.usuarios CASCADE")
-    servicio = ServicioCuentas(AlmacenCuentasPg(cfg), b"k" * 32, n_scrypt=2**10)
+    admin.execute("TRUNCATE tinotify_real.recuperaciones, tinotify_real.sesiones, tinotify_real.invitaciones, tinotify_real.usuarios CASCADE")
+    correo = CorreoFalso()
+    servicio = ServicioCuentas(AlmacenCuentasPg(cfg), b"k" * 32, correo=correo)
+    servicio.correo_falso = correo
     yield servicio, admin
     admin.close()
 
 
+def nueva(s, correo="persona@ejemplo.com", invitacion=None):
+    inv = invitacion or s.crear_invitacion()
+    assert s.solicitar_codigo_registro(correo, inv) == "enviado"
+    return s.registrar(correo, s.correo_falso.codigo(), inv, CONSENT, "telefono")
+
+
 def test_ciclo_completo_de_cuenta_contra_postgres(mundo):
     s, admin = mundo
-    token, usuario = s.registrar("persona@ejemplo.com", CLAVE, s.crear_invitacion(), "consentimiento-v1", "telefono")
+    token, usuario = nueva(s)
     assert s.autenticar(token) == usuario
     fila = admin.execute("SELECT correo_ref, pass_hash FROM tinotify_real.usuarios").fetchone()
-    assert "persona" not in fila[0] and CLAVE not in fila[1]  # ni el correo ni la clave en claro
-    t2, _ = s.iniciar_sesion("persona@ejemplo.com", CLAVE)
-    s.cambiar_clave(usuario.id, CLAVE, "otra-clave-ficticia-2", token)
-    assert s.autenticar(token) == usuario and s.autenticar(t2) is None
-    with pytest.raises(CredencialesIncorrectas):
-        s.iniciar_sesion("persona@ejemplo.com", CLAVE)
+    assert "persona" not in fila[0] and fila[1] == "scrypt$0$0$0$SIN$CLAVE"            # sin contraseña: nada que verificar
+    assert s.solicitar_codigo_acceso("persona@ejemplo.com") == "enviado"
+    t2, _ = s.entrar("persona@ejemplo.com", s.correo_falso.codigo(), "otro-telefono")
+    assert s.autenticar(t2) == usuario
+    with pytest.raises(CodigoNoValido):
+        s.entrar("persona@ejemplo.com", s.correo_falso.codigo())                       # un solo uso
     s.cerrar_sesion(token)
     assert s.autenticar(token) is None
-    t3, _ = s.iniciar_sesion("persona@ejemplo.com", "otra-clave-ficticia-2")
-    s.eliminar_cuenta(usuario.id, "otra-clave-ficticia-2")
-    assert s.autenticar(t3) is None
-    assert admin.execute("SELECT (SELECT count(*) FROM tinotify_real.usuarios), (SELECT count(*) FROM tinotify_real.sesiones)").fetchone() == (0, 0)
+    s.eliminar_cuenta(usuario.id, "persona@ejemplo.com")
+    assert s.autenticar(t2) is None
+    assert admin.execute("SELECT (SELECT count(*) FROM tinotify_real.usuarios), (SELECT count(*) FROM tinotify_real.sesiones), "
+                         "(SELECT count(*) FROM tinotify_real.recuperaciones)").fetchone() == (0, 0, 0)
 
 
 def test_una_invitacion_solo_sirve_una_vez_aun_con_peticiones_simultaneas(mundo):
     s, admin = mundo
     codigo = s.crear_invitacion()
+    import tinotify.real_remoto.cuentas as c
+    from datetime import datetime, timezone
     resultados = []
 
     def intentar(n):
+        correo = f"persona{n}@ejemplo.com"
+        codigo_correo = c.codigo_registro(b"k" * 32, correo, codigo, c.ventana_registro(datetime.now(timezone.utc)))
         try:
-            s.registrar(f"persona{n}@ejemplo.com", CLAVE, codigo, "consentimiento-v1")
+            s.registrar(correo, codigo_correo, codigo, CONSENT)
             resultados.append("ok")
         except RegistroNoValido:
             resultados.append("rechazado")
@@ -74,20 +86,15 @@ def test_una_invitacion_solo_sirve_una_vez_aun_con_peticiones_simultaneas(mundo)
     assert admin.execute("SELECT count(*) FROM tinotify_real.usuarios").fetchone()[0] == 1
 
 
-def test_correo_repetido_y_bloqueo_por_fallos(mundo):
-    s, admin = mundo
-    s.registrar("persona@ejemplo.com", CLAVE, s.crear_invitacion(), "consentimiento-v1")
-    with pytest.raises(RegistroNoValido):
-        s.registrar("PERSONA@ejemplo.com", CLAVE, s.crear_invitacion(), "consentimiento-v1")
-    for _ in range(5):
-        with pytest.raises(CredencialesIncorrectas):
-            s.iniciar_sesion("persona@ejemplo.com", "clave-mala-ficticia")
-    assert admin.execute("SELECT intentos_fallidos, bloqueado_hasta IS NOT NULL FROM tinotify_real.usuarios").fetchone() == (5, True)
+def test_correo_repetido_se_dice_antes_de_enviar_nada(mundo):
+    s, _ = mundo
+    nueva(s)
+    assert s.solicitar_codigo_registro("PERSONA@ejemplo.com", s.crear_invitacion()) == "ya_registrado"
 
 
-def test_las_tres_tablas_tienen_rls_forzado_y_los_clientes_de_supabase_no_entran(mundo):
+def test_las_tablas_tienen_rls_forzado_y_los_clientes_de_supabase_no_entran(mundo):
     _, admin = mundo
-    for tabla in ("usuarios", "invitaciones", "sesiones"):
+    for tabla in ("usuarios", "invitaciones", "sesiones", "recuperaciones"):
         assert admin.execute("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE oid = %s::regclass",
                              (f"tinotify_real.{tabla}",)).fetchone() == (True, True)
         for rol in ("anon", "authenticated", "service_role"):
@@ -97,15 +104,28 @@ def test_las_tres_tablas_tienen_rls_forzado_y_los_clientes_de_supabase_no_entran
 def test_el_correo_de_aviso_se_guarda_cifrado_y_solo_se_lee_con_la_llave(mundo):
     from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg
     s, admin = mundo
-    a = s._a if hasattr(s, "_a") else None
+    a = s._a
     assert isinstance(a, AlmacenCuentasPg)
-    con_llave = ServicioCuentas(a, b"k" * 32, n_scrypt=2**10, llave_correo=b"c" * 32)
-    _, usuario = con_llave.registrar("destino@ejemplo.com", CLAVE, con_llave.crear_invitacion(), "consentimiento-v1")
+    con_llave = ServicioCuentas(a, b"k" * 32, llave_correo=b"c" * 32, correo=s.correo_falso)
+    inv = con_llave.crear_invitacion()
+    con_llave.solicitar_codigo_registro("destino@ejemplo.com", inv)
+    _, usuario = con_llave.registrar("destino@ejemplo.com", s.correo_falso.codigo(), inv, CONSENT)
     bruto = admin.execute("SELECT correo_nonce, correo_cifrado FROM tinotify_real.usuarios WHERE id = %s", (usuario.id,)).fetchone()
     assert b"destino" not in bytes(bruto[1]) and b"ejemplo" not in bytes(bruto[1])
     assert con_llave.correo_de(usuario.id) == "destino@ejemplo.com"
     assert ServicioCuentas(a, b"k" * 32, llave_correo=b"z" * 32).correo_de(usuario.id) is None
-    _, sin = s.registrar("otra@ejemplo.com", CLAVE, s.crear_invitacion(), "consentimiento-v1")       # el servicio del fixture no guarda correo
+    _, sin = nueva(s, "otra@ejemplo.com")                                              # el servicio del fixture no guarda correo
     assert admin.execute("SELECT correo_cifrado IS NULL FROM tinotify_real.usuarios WHERE id = %s", (sin.id,)).fetchone()[0] is True
     with pytest.raises(Exception):
         admin.execute("UPDATE tinotify_real.usuarios SET correo_nonce = '\\x00'::bytea WHERE id = %s", (sin.id,))   # nonce sin cifrado: lo impide la restricción
+
+
+def test_la_invitacion_vigente_se_consulta_sin_consumirla(mundo):
+    from datetime import datetime, timedelta, timezone
+    import tinotify.real_remoto.cuentas as c
+    s, admin = mundo
+    inv = s.crear_invitacion()
+    ahora = datetime.now(timezone.utc)
+    assert s._a.invitacion_vigente(c.hash_invitacion(inv), ahora) is True and s._a.invitacion_vigente(c.hash_invitacion(inv), ahora) is True
+    assert s._a.invitacion_vigente(c.hash_invitacion(inv), ahora + timedelta(days=8)) is False
+    assert s._a.invitacion_vigente(c.hash_invitacion("AAAA-AAAA-AAAA-AAAA"), ahora) is False

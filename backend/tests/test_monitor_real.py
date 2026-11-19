@@ -10,6 +10,7 @@ import threading
 
 import pytest
 
+from backend.tests.helpers.correo_falso import CorreoFalso
 from backend.tests.helpers.monitor_real import AlmacenMemoria, SigacSimulado
 from backend.tests.test_contrato_expediente import CLAVE_TEST, politica_de_prueba
 from backend.tests.test_real_remoto import CAB, TOKEN, cliente_http, config, entorno_valido, login, referencia_de
@@ -193,6 +194,8 @@ def huellas_del_simulado(textos):
 
 class Mundo:
     def __init__(self, casos, *, sim_extra=None, almacen=None, llave=LLAVE, max_logins=30, con_monitor=True, fabrica=None, cuentas=None, correo=None):
+        correo = None if correo is False else (correo if correo is not None else (CorreoFalso() if cuentas is not None else None))  # False: sin correo configurado
+        self.correo = correo  # con cuentas siempre hay un correo falso: los códigos se leen de ahí
         self.sim = SigacSimulado(casos, **(sim_extra or {}))
         self.almacen = almacen or AlmacenMemoria()
         referencia, _ = referencia_de(huellas_del_simulado(BASE_101))
