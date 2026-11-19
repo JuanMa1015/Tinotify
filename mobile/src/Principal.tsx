@@ -170,7 +170,13 @@ function Casos({ estado, expedientes, token, onCambio, onError, onAbrir }: { est
           <Pressable key={id} accessibilityRole="button" accessibilityState={{ selected: filtro === id }} onPress={() => setFiltro(id)}
             style={[s.chip, filtro === id && s.chipOn]}><Text style={[s.chipTxt, filtro === id && { color: colores.blanco }]}>{texto}</Text></Pressable>)}
       </View>
-      {sinVer > 0 && <Text style={s.enlace} accessibilityRole="button" onPress={() => { void verTodos(); }}>Marcar todo como visto ({sinVer})</Text>}
+      {sinVer > 0 && <View style={s.barraVistos}>
+        <Text style={[s.cuerpo, { flex: 1 }]}>{sinVer === 1 ? '1 expediente con novedades sin ver' : `${sinVer} expedientes con novedades sin ver`}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Marcar todo como visto" onPress={() => { void verTodos(); }} style={s.botonVistos}>
+          <Ionicons name="checkmark-done" size={18} color={colores.marino} />
+          <Text style={s.botonVistosTxt}>Marcar vistos</Text>
+        </Pressable>
+      </View>}
       {visibles.length === 0 ? <Tarjeta><Text style={s.cuerpo}>{lista.length === 0 ? 'Aún no hay expedientes guardados. Aparecerán tras la próxima revisión.' : 'Ningún expediente coincide con el filtro.'}</Text></Tarjeta> :
         visibles.map(x => <Pressable key={x.id} accessibilityRole="button" onPress={() => { void ver(x); }}>
           <Tarjeta>
@@ -342,6 +348,9 @@ const s = StyleSheet.create({
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   volver: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
   cabecera: { marginBottom: espacio.l },
+  barraVistos: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colores.azulChip, borderRadius: radios.medio, paddingVertical: 10, paddingLeft: 14, paddingRight: 10, marginTop: 14, marginBottom: 14 },
+  botonVistos: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colores.blanco, borderWidth: 1, borderColor: colores.borde, borderRadius: radios.pildora, paddingHorizontal: 12, paddingVertical: 8 },
+  botonVistosTxt: { fontSize: 14, fontWeight: '700', color: colores.marino },
   estadoChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radios.pildora },
   estadoTxt: { fontSize: 14, fontWeight: '700' }, punto: { width: 9, height: 9, borderRadius: 5 },
   cuenta: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radios.chico, borderWidth: 1, borderColor: colores.borde, backgroundColor: colores.blanco },
