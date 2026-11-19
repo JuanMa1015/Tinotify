@@ -1,36 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { esTokenDeUsuario, mensajeDeAuth, validarClave, validarCorreo, validarRegistro } from '../src/cuentas.ts';
-
-const BUENO = { invitacion: 'ABCD-EFGH-JKMN-PQRS', correo: 'persona@ejemplo.com', clave: 'una-clave-ficticia-1', confirmar: 'una-clave-ficticia-1', aceptoPolitica: true, aceptoSigac: true };
+import { TEXTOS_CODIGO, esTokenDeUsuario, mensajeDeAuth, validarCorreo, validarInvitacion } from '../src/cuentas.ts';
 
 test('el correo se valida como en el servidor', () => {
   assert.equal(validarCorreo(' Persona@Ejemplo.COM '), null);
   for (const malo of ['', 'sin-arroba', 'a@b', 'a@@b.com', 'a..b@c.com', 'a b@c.com']) assert.notEqual(validarCorreo(malo), null, malo);
 });
 
-test('la contraseña exige longitud, variedad y no parecerse al correo', () => {
-  assert.equal(validarClave('una-clave-ficticia-1'), null);
-  assert.match(validarClave('corta')!, /entre 10 y 128/);
-  assert.match(validarClave('x'.repeat(200))!, /entre 10 y 128/);
-  assert.match(validarClave('aaaaaaaaaaaa')!, /simple/);
-  assert.match(validarClave('persona@ejemplo.com', 'Persona@Ejemplo.com')!, /igual al correo/);
+test('la invitación se acepta con o sin guiones y exige longitud', () => {
+  assert.equal(validarInvitacion('ABCD-EFGH-JKMN-PQRS'), null);
+  assert.equal(validarInvitacion(' abcd efgh jkmn pqrs '), null);
+  assert.match(validarInvitacion('abc')!, /invitación/);
 });
 
-test('el registro valida en orden y exige las dos casillas', () => {
-  assert.equal(validarRegistro(BUENO), null);
-  assert.match(validarRegistro({ ...BUENO, invitacion: 'abc' })!, /invitación/);
-  assert.match(validarRegistro({ ...BUENO, correo: 'mal' })!, /correo/);
-  assert.match(validarRegistro({ ...BUENO, confirmar: 'otra-clave-ficticia' })!, /no coinciden/);
-  assert.match(validarRegistro({ ...BUENO, aceptoPolitica: false })!, /política/);
-  assert.match(validarRegistro({ ...BUENO, aceptoSigac: false })!, /SIGAC/);
+test('cada respuesta del servidor al pedir un código tiene un texto claro para la persona', () => {
+  for (const estado of ['no_registrado', 'limite', 'fallo_envio', 'invitacion_invalida', 'ya_registrado', 'correo_invalido']) {
+    assert.ok(TEXTOS_CODIGO[estado] && TEXTOS_CODIGO[estado].length > 20, estado);
+  }
+  assert.match(TEXTOS_CODIGO.ya_registrado, /Entrar/);
+  assert.match(TEXTOS_CODIGO.no_registrado, /mismo con el que creaste/);
 });
 
 test('los errores del servidor se traducen a mensajes claros', () => {
-  assert.match(mensajeDeAuth(422, 'datos_no_validos:clave_longitud')!, /entre 10 y 128/);
   assert.match(mensajeDeAuth(422, 'consentimiento_no_valido')!, /Actualiza/);
-  assert.match(mensajeDeAuth(400)!, /invitación/);
-  assert.equal(mensajeDeAuth(401), 'Correo o contraseña incorrectos.');
+  assert.match(mensajeDeAuth(400)!, /código no es válido/);
+  assert.match(mensajeDeAuth(401)!, /sesión/);
   assert.match(mensajeDeAuth(429)!, /Espera/);
   assert.equal(mensajeDeAuth(500), null);
 });

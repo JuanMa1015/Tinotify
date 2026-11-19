@@ -44,3 +44,8 @@ export const guardarNombreSigac = (nombre: string, intento: number) => SecureSto
 export const borrarNombres = async () => { await SecureStore.deleteItemAsync(CLAVE_NOMBRE_SIGAC); await SecureStore.deleteItemAsync('tinotify.nombre-sigac.v1'); await SecureStore.deleteItemAsync('tinotify.nombre.v1'); };
 export const leerNombre = () => SecureStore.getItemAsync(CLAVE_NOMBRE);
 export const guardarNombre = (nombre: string) => (nombre === '' ? SecureStore.deleteItemAsync(CLAVE_NOMBRE) : SecureStore.setItemAsync(CLAVE_NOMBRE, nombre));
+
+// La huella se ofrece una sola vez, tras la primera entrada; después se maneja desde Ajustes → Seguridad.
+const CLAVE_HUELLA_OFRECIDA = 'tinotify.huella-ofrecida.v1';
+export const huellaOfrecida = async () => (await SecureStore.getItemAsync(CLAVE_HUELLA_OFRECIDA)) === '1';
+export const marcarHuellaOfrecida = () => SecureStore.setItemAsync(CLAVE_HUELLA_OFRECIDA, '1');

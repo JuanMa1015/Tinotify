@@ -3,11 +3,12 @@ import { Alert, BackHandler, Image, Linking, Pressable, RefreshControl, ScrollVi
 import { Ionicons } from '@expo/vector-icons';
 import Acceso from './Acceso';
 import Ajustes, { type SeccionAjustes } from './Ajustes';
-import { CambiarClave, EliminarCuenta } from './AuthPantallas';
+import Admin from './Admin';
+import { EliminarCuenta } from './AuthPantallas';
 import { URL_SIGAC, esTokenDeUsuario } from './cuentas';
 import { guardarNombre, guardarNombreSigac, leerNombre, leerNombreSigac } from './almacen';
-import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, descargarAnexo, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, obtenerNovedades, obtenerPerfil, type Actuacion, type Expediente, type Novedad } from './api';
+import { Aviso, BarraInferior, Boton, Etiqueta, PantallaCarga, Tarjeta, TarjetaEsqueleto, Titulo, type Icono, type ItemBarra } from './componentes';
+import { ErrorApi, descargarAnexo, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, obtenerNovedades, obtenerPerfil, obtenerYo, type Actuacion, type Expediente, type Novedad } from './api';
 import { type Destino } from './notificaciones';
 import {
   agruparPorDia, nombreParaSaludo, primerNombre, canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, tonoDeEstado, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
@@ -24,10 +25,21 @@ const saludo = (nombre = '') => {
   const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', hour12: false }).format(new Date()));
   return `${h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'}${nombre ? `, ${nombre}` : ''}`;
 };
+// Las cuentas administradoras no hacen seguimiento de expedientes: su pantalla de inicio es el panel.
+const ITEMS_ADMIN: ItemBarra[] = [
+  { id: 'admin', texto: 'Administración', icono: 'people-outline' }, { id: 'ajustes', texto: 'Ajustes', icono: 'settings-outline' },
+];
 const mensajeDe = (err: unknown, otro = 'No se completó la operación.') => (err instanceof ErrorApi ? err.message : otro);
 
 export default function Principal({ token, correo, biometria, version, onBiometria, onSalir, destino, onDestinoAtendido }: Props) {
   const [pestana, setPestana] = useState('inicio');
+  const [esAdmin, setEsAdmin] = useState(!esTokenDeUsuario(token));  // el propietario siempre administra; una cuenta, solo si lo es
+  const [rolListo, setRolListo] = useState(!esTokenDeUsuario(token));  // hasta saber el rol no se pide nada del seguimiento
+  useEffect(() => {
+    if (!esTokenDeUsuario(token)) { setEsAdmin(true); setRolListo(true); return; }
+    obtenerYo(token).then(r => { setEsAdmin(r.admin === true); setRolListo(true); }, () => setRolListo(true));
+  }, [token]);
+  useEffect(() => { if (rolListo && esAdmin) setPestana(p => (p === 'inicio' ? 'admin' : p)); }, [rolListo, esAdmin]);
   const [estado, setEstado] = useState<EstadoMonitor>();
   const [ejecuciones, setEjecuciones] = useState<Ejecucion[]>();
   const [expedientes, setExpedientes] = useState<Expediente[] | null>();  // null: el servidor aún no ofrece el listado
@@ -36,7 +48,8 @@ export default function Principal({ token, correo, biometria, version, onBiometr
   const [nombre, setNombre] = useState('');
   useEffect(() => { void leerNombre().then(n => setNombre(nombreParaSaludo(n))).catch(() => undefined); }, []);
   const [nombreSigac, setNombreSigac] = useState('');
-  useEffect(() => {  // el nombre de SIGAC se pide una vez (como mucho una vez al día si falla) y se guarda solo en este teléfono
+  useEffect(() => {  // el nombre de SIGAC se pide una vez (reintenta cada 6 h si falla) y se guarda solo en este teléfono
+    if (!rolListo || esAdmin) return;  // una cuenta administradora no tiene SIGAC que leer
     let vivo = true;
     void (async () => {
       const guardado = await leerNombreSigac();
@@ -49,13 +62,13 @@ export default function Principal({ token, correo, biometria, version, onBiometr
       if (vivo && encontrado) setNombreSigac(encontrado);
     })().catch(() => undefined);
     return () => { vivo = false; };
-  }, [token]);
+  }, [token, rolListo, esAdmin]);
   const [error, setError] = useState('');
   const [lento, setLento] = useState(false);
   const [refrescando, setRefrescando] = useState(false);
   const [reconectando, setReconectando] = useState(false);
   const [abierto, setAbierto] = useState<Expediente | null>(null);
-  const [cuenta, setCuenta] = useState<'cambiar' | 'eliminar' | null>(null);
+  const [cuenta, setCuenta] = useState<'eliminar' | null>(null);
   const [seccionAjustes, setSeccionAjustes] = useState<SeccionAjustes | null>(null);
   const usuario = esTokenDeUsuario(token);
 
@@ -85,7 +98,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     } finally { clearTimeout(aviso); setLento(false); setRefrescando(false); }
   }, [token, onSalir]);
 
-  useEffect(() => { void cargar(); }, [cargar]);
+  useEffect(() => { if (rolListo && !esAdmin) void cargar(); }, [cargar, rolListo, esAdmin]);
 
   useEffect(() => {  // el botón «atrás» de Android sube un nivel; solo cierra la app desde Inicio
     const escucha = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -93,17 +106,19 @@ export default function Principal({ token, correo, biometria, version, onBiometr
       if (cuenta) { setCuenta(null); return true; }
       if (abierto) { setAbierto(null); return true; }
       if (pestana === 'ajustes' && seccionAjustes) { setSeccionAjustes(null); return true; }
-      if (pestana !== 'inicio') { setPestana('inicio'); return true; }
+      const inicio = esAdmin ? 'admin' : 'inicio';
+      if (pestana !== inicio) { setPestana(inicio); return true; }
       return false;
     });
     return () => escucha.remove();
-  }, [reconectando, cuenta, abierto, pestana, seccionAjustes]);
+  }, [reconectando, cuenta, abierto, pestana, seccionAjustes, esAdmin]);
+
+  if (!rolListo) return <PantallaCarga />;
 
   if (reconectando) {
     return <Acceso tokenFijo={token} onCancelar={() => setReconectando(false)} onListo={async () => { setReconectando(false); await cargar(); }} />;
   }
 
-  if (cuenta === 'cambiar') return <CambiarClave token={token} onCancelar={() => setCuenta(null)} onListo={() => { setCuenta(null); Alert.alert('Contraseña actualizada', 'Se cerró la sesión en tus otros dispositivos.'); }} />;
   if (cuenta === 'eliminar') return <EliminarCuenta token={token} onCancelar={() => setCuenta(null)} onEliminada={onSalir} />;
   if (abierto) return <DetalleExpediente token={token} expediente={abierto} onVolver={() => setAbierto(null)} />;
 
@@ -112,17 +127,18 @@ export default function Principal({ token, correo, biometria, version, onBiometr
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
       {lento && refrescando && <Tarjeta><Text style={s.cuerpo}>Estamos preparando tu información. La primera carga del día puede tardar hasta un minuto.</Text></Tarjeta>}
+      {pestana === 'admin' && esAdmin && <><Titulo texto="Administración" subtitulo="Cuentas, invitaciones y accesos" /><Admin token={token} /></>}
       {pestana === 'inicio' && <Inicio estado={estado} nombre={nombre || primerNombre(nombreSigac)} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'novedades' && <Novedades novedades={novedades} expedientes={expedientes} token={token} onCambio={setNovedades} onExpedientes={setExpedientes}
         onError={setError} onAbrir={setAbierto} fallo={novedadesFallo} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
-      {pestana === 'ajustes' && <Ajustes token={token} usuario={usuario} correo={correo} estado={estado} biometria={biometria} version={version}
+      {pestana === 'ajustes' && <Ajustes token={token} usuario={usuario} admin={esAdmin} correo={correo} estado={estado} biometria={biometria} version={version}
         nombre={nombre} nombreSigac={nombreSigac} onNombre={n => { const limpio = nombreParaSaludo(n); setNombre(limpio); void guardarNombre(limpio); }}
         onBiometria={onBiometria} onSalir={onSalir} onReconectar={() => setReconectando(true)} onCuenta={setCuenta}
         seccion={seccionAjustes} onSeccion={setSeccionAjustes} />}
     </ScrollView>
-    <BarraInferior activa={pestana} onElegir={setPestana} insignias={{ novedades: (novedades ?? []).filter(x => !x.vista).length }} />
+    <BarraInferior activa={pestana} onElegir={setPestana} items={esAdmin ? ITEMS_ADMIN : undefined} insignias={{ novedades: (novedades ?? []).filter(x => !x.vista).length }} />
   </View>;
 }
 

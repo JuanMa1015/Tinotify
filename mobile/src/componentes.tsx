@@ -40,8 +40,9 @@ export function Aviso({ texto }: { texto: string }) {
   return <View accessibilityLiveRegion="polite" style={e.aviso}><Ionicons name="alert-circle" size={18} color={colores.error} /><Text style={e.avisoTxt}>{texto}</Text></View>;
 }
 
-export function BarraInferior({ activa, onElegir, insignias }: { activa: string; onElegir: (id: string) => void; insignias?: Record<string, number> }) {
-  const items: { id: string; texto: string; icono: Icono }[] = [
+export type ItemBarra = { id: string; texto: string; icono: Icono };
+export function BarraInferior({ activa, onElegir, insignias, items: propios }: { activa: string; onElegir: (id: string) => void; insignias?: Record<string, number>; items?: ItemBarra[] }) {
+  const items: ItemBarra[] = propios ?? [
     { id: 'inicio', texto: 'Inicio', icono: 'home-outline' }, { id: 'casos', texto: 'Casos', icono: 'folder-outline' },
     { id: 'novedades', texto: 'Novedades', icono: 'notifications-outline' },
     { id: 'actividad', texto: 'Actividad', icono: 'refresh-outline' }, { id: 'ajustes', texto: 'Ajustes', icono: 'settings-outline' },

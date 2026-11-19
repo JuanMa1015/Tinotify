@@ -4,16 +4,16 @@ import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import Acceso from './src/Acceso';
-import { Bienvenida, Login, RecuperarClave, Registro } from './src/AuthPantallas';
+import { Bienvenida, Login, Registro } from './src/AuthPantallas';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
-import { cerrarSesionEnServidor, obtenerEstado } from './src/api';
-import { biometriaActiva, borrarCorreo, borrarNombres, borrarToken, desbloquear, fijarBiometria, guardarCorreo, guardarToken, leerCorreo, leerToken } from './src/almacen';
+import { cerrarSesionEnServidor, obtenerEstado, obtenerYo } from './src/api';
+import { biometriaActiva, biometriaDisponible, borrarCorreo, borrarNombres, borrarToken, desbloquear, fijarBiometria, guardarCorreo, guardarToken, huellaOfrecida, leerCorreo, leerToken, marcarHuellaOfrecida } from './src/almacen';
 import { esTokenDeUsuario } from './src/cuentas';
 import { destinoDeNotificacion, type Destino } from './src/notificaciones';
 import { colores } from './src/tema';
 
-type Fase = 'cargando' | 'bloqueada' | 'bienvenida' | 'login' | 'recuperar' | 'registro' | 'propietario' | 'conectar' | 'principal';
+type Fase = 'cargando' | 'bloqueada' | 'bienvenida' | 'login' | 'registro' | 'propietario' | 'conectar' | 'principal';
 
 export default function App() {
   const [fase, setFase] = useState<Fase>('cargando');
@@ -44,13 +44,29 @@ export default function App() {
     return () => escucha.remove();
   }, []);
 
-  // Tras registrarse o iniciar sesión: si la cuenta aún no tiene SIGAC conectado, se pide conectarlo.
+  // Tras la primera entrada en este teléfono se ofrece la huella (una sola vez) para que las siguientes aperturas no pidan nada más.
+  async function ofrecerHuella() {
+    try {
+      if ((await huellaOfrecida()) || (await biometriaActiva()) || !(await biometriaDisponible())) return;
+      await marcarHuellaOfrecida();
+      Alert.alert('¿Abrir Tinotify con tu huella o rostro?', 'Así no tendrás que pedir un código cada vez que abras la aplicación. Puedes cambiarlo después en Ajustes → Seguridad.', [
+        { text: 'Ahora no', style: 'cancel' },
+        { text: 'Activar', onPress: () => { void cambiarBiometria(true); } },
+      ]);
+    } catch { /* la huella es opcional */ }
+  }
+
+  // Tras registrarse o entrar: una cuenta administradora va directo a su panel; una de seguimiento conecta SIGAC si aún no lo ha hecho.
   async function alAutenticar(nuevo: string, esRegistro: boolean, correoNuevo?: string) {
     await guardarToken(nuevo); setToken(nuevo);
     if (correoNuevo) { await guardarCorreo(correoNuevo); setCorreo(correoNuevo); }
+    void ofrecerHuella();
     if (esRegistro) { setFase('conectar'); return; }
-    try { setFase((await obtenerEstado(nuevo)).credenciales_guardadas ? 'principal' : 'conectar'); }
-    catch { setFase('principal'); }
+    try {
+      const yo = await obtenerYo(nuevo);
+      if (yo.admin) { setFase('principal'); return; }
+      setFase((await obtenerEstado(nuevo)).credenciales_guardadas ? 'principal' : 'conectar');
+    } catch { setFase('principal'); }
   }
   async function alConectarPropietario(nuevo: string) { await guardarToken(nuevo); setToken(nuevo); setFase('principal'); }
 
@@ -75,8 +91,7 @@ export default function App() {
       <Boton texto="Desbloquear" icono="finger-print" onPress={() => { void intentarDesbloqueo(); }} />
     </View>}
     {fase === 'bienvenida' && <Bienvenida onLogin={() => setFase('login')} onRegistro={() => setFase('registro')} onPropietario={() => setFase('propietario')} />}
-    {fase === 'login' && <Login onListo={(t, c) => alAutenticar(t, false, c)} onVolver={() => setFase('bienvenida')} onOlvide={() => setFase('recuperar')} />}
-    {fase === 'recuperar' && <RecuperarClave onListo={() => { setFase('login'); Alert.alert('Contraseña actualizada', 'Ya puedes iniciar sesión con la nueva.'); }} onVolver={() => setFase('login')} />}
+    {fase === 'login' && <Login onListo={(t, c) => alAutenticar(t, false, c)} onVolver={() => setFase('bienvenida')} />}
     {fase === 'registro' && <Registro onListo={(t, c) => alAutenticar(t, true, c)} onVolver={() => setFase('bienvenida')} />}
     {fase === 'propietario' && <Acceso onListo={alConectarPropietario} onCancelar={() => setFase('bienvenida')} />}
     {fase === 'conectar' && token && <Acceso tokenFijo={token} titulo="Conecta tu cuenta de SIGAC" onListo={async () => setFase('principal')} onCancelar={() => setFase('principal')} />}
