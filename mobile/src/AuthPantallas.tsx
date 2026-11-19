@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { Aviso, Boton, Campo, Tarjeta } from './componentes';
+import { Aviso, Boton, Campo, CampoCodigo, Tarjeta } from './componentes';
+import { guardarUltimoCorreo, leerUltimoCorreo } from './almacen';
 import { ErrorApi, adminUsuarios, eliminarCuenta, entrar, pedirCodigoAcceso, pedirCodigoRegistro, registrar } from './api';
 import { TEXTOS_CODIGO, URL_POLITICA, URL_TERMINOS, mensajeDeAuth, validarCorreo, validarInvitacion } from './cuentas';
 import { colores, espacio } from './tema';
@@ -24,22 +26,33 @@ function useEspera() {
   return [espera, () => setEspera(30)] as const;
 }
 
-/** Confirmación de que el código salió, el campo para escribirlo y el botón para pedir otro. */
-function PasoCodigo({ correo, codigo, onCodigo, espera, cargando, error, textoBoton, onConfirmar, onOtro, vigencia }: {
+function Paso({ n, de, texto }: { n: number; de: number; texto: string }) {
+  return <Text style={s.paso}>PASO {n} DE {de} · {texto.toUpperCase()}</Text>;
+}
+
+/** Paso del código: dónde se envió, el campo (se envía solo al completar los 6 dígitos) y cómo pedir otro o cambiar de correo. */
+function PasoCodigo({ correo, codigo, onCodigo, espera, cargando, error, textoBoton, onConfirmar, onOtro, onCambiarCorreo, vigencia }: {
   correo: string; codigo: string; onCodigo: (c: string) => void; espera: number; cargando: boolean; error: string;
-  textoBoton: string; onConfirmar: () => void; onOtro: () => void; vigencia: string;
+  textoBoton: string; onConfirmar: (c: string) => void; onOtro: () => void; onCambiarCorreo: () => void; vigencia: string;
 }) {
   return <>
-    <Tarjeta estilo={{ backgroundColor: colores.limaSuave, borderColor: '#9DC356' }}>
-      <Text style={s.confirmacion}>✓ Te enviamos un código a {correo}</Text>
-      <Text style={s.nota}>Revisa también la carpeta de spam. Vale {vigencia}.</Text>
+    <Tarjeta>
+      <View style={s.fila}>
+        <Ionicons name="mail-outline" size={28} color={colores.marino} />
+        <View style={{ flex: 1 }}>
+          <Text style={s.confirmacion}>Revisa tu correo</Text>
+          <Text style={s.texto}>Enviamos un código de 6 dígitos a <Text style={{ fontWeight: '700' }}>{correo}</Text>. Vale {vigencia}.</Text>
+        </View>
+      </View>
+      <Text style={s.nota}>Si no lo ves en un minuto, mira en la carpeta de spam o correo no deseado.</Text>
     </Tarjeta>
     <Tarjeta>
-      <Campo icono="keypad-outline" etiqueta="Código del correo" valor={codigo} onCambio={onCodigo} mayusculas />
+      <CampoCodigo valor={codigo} onCambio={onCodigo} onCompleto={onConfirmar} desactivado={cargando} />
       {error !== '' && <Aviso texto={error} />}
-      <Boton texto={textoBoton} icono="paw" onPress={onConfirmar} cargando={cargando} desactivado={codigo.trim().length < 8} />
+      <Boton texto={textoBoton} icono="paw" onPress={() => onConfirmar(codigo)} cargando={cargando} desactivado={codigo.length < 6} />
     </Tarjeta>
-    <Boton texto={espera > 0 ? `Pedir otro código (${espera} s)` : 'Pedir otro código'} secundario icono="refresh-outline" onPress={onOtro} cargando={cargando} desactivado={espera > 0} />
+    <Boton texto={espera > 0 ? `Reenviar código en ${espera} s` : 'Reenviar código'} secundario icono="refresh-outline" onPress={onOtro} desactivado={espera > 0 || cargando} />
+    <Text accessibilityRole="button" style={s.enlace} onPress={onCambiarCorreo}>Usar otro correo</Text>
   </>;
 }
 
@@ -66,6 +79,7 @@ export function Login({ onListo, onVolver }: { onListo: (token: string, correo: 
   const [error, setError] = useState('');
   const [espera, reiniciarEspera] = useEspera();
   const limpio = correo.trim().toLowerCase();
+  useEffect(() => { void leerUltimoCorreo().then(c => { if (c) setCorreo(prev => prev || c); }).catch(() => undefined); }, []);
 
   async function pedir() {
     const falla = validarCorreo(correo);
@@ -77,23 +91,25 @@ export function Login({ onListo, onVolver }: { onListo: (token: string, correo: 
     } catch (err) { setError(mensaje(err)); } finally { setCargando(false); }
   }
 
-  async function confirmar() {
+  async function confirmar(c = codigo) {
+    if (cargando || c.length < 6) return;
     setCargando(true); setError('');
-    try { const r = await entrar(limpio, codigo.trim()); await onListo(r.token, limpio); }
+    try { const r = await entrar(limpio, c); await guardarUltimoCorreo(limpio); await onListo(r.token, limpio); }
     catch (err) { setError(err instanceof ErrorApi && err.estado === 400 ? 'El código no es válido o ya venció. Pide uno nuevo.' : mensaje(err)); setCargando(false); }
   }
 
   return <Marco>
     <Text accessibilityRole="header" style={s.titulo}>Entrar</Text>
+    <Paso n={enviado ? 2 : 1} de={2} texto={enviado ? 'Escribe el código' : 'Tu correo'} />
     {!enviado ? <>
-      <Text style={s.nota}>Escribe el correo con el que creaste tu cuenta. Te enviamos un código de un solo uso; no hace falta contraseña.</Text>
+      <Text style={s.nota}>Escribe el correo con el que creaste tu cuenta. Te enviamos un código de 6 dígitos; no hace falta contraseña.</Text>
       <Tarjeta>
         <Campo icono="mail-outline" etiqueta="Correo" valor={correo} onCambio={setCorreo} teclado="email-address" />
         {error !== '' && <Aviso texto={error} />}
-        <Boton texto="Enviar código" icono="mail-outline" onPress={() => { void pedir(); }} cargando={cargando} desactivado={correo.trim() === ''} />
+        <Boton texto="Enviarme el código" icono="mail-outline" onPress={() => { void pedir(); }} cargando={cargando} desactivado={correo.trim() === ''} />
       </Tarjeta>
     </> : <PasoCodigo correo={limpio} codigo={codigo} onCodigo={setCodigo} espera={espera} cargando={cargando} error={error} vigencia="15 minutos"
-      textoBoton="Entrar" onConfirmar={() => { void confirmar(); }} onOtro={() => { void pedir(); }} />}
+      textoBoton="Entrar" onConfirmar={c => { void confirmar(c); }} onOtro={() => { void pedir(); }} onCambiarCorreo={() => { setEnviado(false); setCodigo(''); setError(''); }} />}
     <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
   </Marco>;
 }
@@ -122,14 +138,16 @@ export function Registro({ onListo, onVolver }: { onListo: (token: string, corre
     } catch (err) { setError(mensaje(err)); } finally { setCargando(false); }
   }
 
-  async function confirmar() {
+  async function confirmar(c = codigo) {
+    if (cargando || c.length < 6) return;
     setCargando(true); setError('');
-    try { const r = await registrar({ invitacion: invitacion.trim(), correo: limpio, codigo: codigo.trim() }); await onListo(r.token, limpio); }
+    try { const r = await registrar({ invitacion: invitacion.trim(), correo: limpio, codigo: c }); await guardarUltimoCorreo(limpio); await onListo(r.token, limpio); }
     catch (err) { setError(err instanceof ErrorApi && err.estado === 400 ? 'El código no es válido o ya venció. Pide uno nuevo.' : mensaje(err)); setCargando(false); }
   }
 
   return <Marco>
     <Text accessibilityRole="header" style={s.titulo}>Crear cuenta</Text>
+    <Paso n={enviado ? 2 : 1} de={2} texto={enviado ? 'Verifica tu correo' : 'Tus datos'} />
     {!enviado ? <>
       <Text style={s.nota}>Antes de empezar: guardamos tu usuario y clave de SIGAC cifrados y entramos a SIGAC por ti tres veces al día. No guardamos el historial de tus actuaciones; sí la lista de tus expedientes (radicado, nombre y estado) y, por 90 días, una ficha corta de cada actuación nueva, todo cifrado. Puedes borrar todo cuando quieras.</Text>
       <Tarjeta>
@@ -146,10 +164,10 @@ export function Registro({ onListo, onVolver }: { onListo: (token: string, corre
           <Text style={s.texto}>Autorizo a Tinotify a guardar mis datos de acceso cifrados y a consultar SIGAC por mí, incluida la transferencia de datos a proveedores fuera de Colombia.</Text>
         </View>
         {error !== '' && <Aviso texto={error} />}
-        <Boton texto="Enviar código a mi correo" icono="mail-outline" onPress={() => { void pedir(); }} cargando={cargando} />
+        <Boton texto="Continuar" icono="arrow-forward" onPress={() => { void pedir(); }} cargando={cargando} />
       </Tarjeta>
     </> : <PasoCodigo correo={limpio} codigo={codigo} onCodigo={setCodigo} espera={espera} cargando={cargando} error={error} vigencia="10 minutos"
-      textoBoton="Crear mi cuenta" onConfirmar={() => { void confirmar(); }} onOtro={() => { void pedir(); }} />}
+      textoBoton="Crear mi cuenta" onConfirmar={c => { void confirmar(c); }} onOtro={() => { void pedir(); }} onCambiarCorreo={() => { setEnviado(false); setCodigo(''); setError(''); }} />}
     <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
     <Text style={s.nota}>Tinotify no está afiliado a SIGAC. Los avisos son una ayuda: confirma siempre en el sistema oficial.</Text>
   </Marco>;
@@ -204,7 +222,8 @@ export function EliminarCuenta({ token, onEliminada, onCancelar }: { token: stri
 }
 
 const s = StyleSheet.create({
-  confirmacion: { fontSize: 16, fontWeight: '700', color: colores.marino, marginBottom: 4 },
+  confirmacion: { fontSize: 18, fontWeight: '700', color: colores.marino, marginBottom: 2 },
+  paso: { fontSize: 12, fontWeight: '800', color: colores.marinoSuave, letterSpacing: 0.8, marginBottom: espacio.s },
   pagina: { padding: 20, paddingTop: 56, paddingBottom: 32 },
   marca: { alignItems: 'center', marginBottom: espacio.xl },
   lema: { fontSize: 16, color: colores.textoSuave, textAlign: 'center', marginTop: 6 },

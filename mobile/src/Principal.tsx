@@ -33,6 +33,7 @@ const mensajeDe = (err: unknown, otro = 'No se completó la operación.') => (er
 
 export default function Principal({ token, correo, biometria, version, onBiometria, onSalir, destino, onDestinoAtendido }: Props) {
   const [pestana, setPestana] = useState('inicio');
+  const [recargaAdmin, setRecargaAdmin] = useState(0);
   const [esAdmin, setEsAdmin] = useState(!esTokenDeUsuario(token));  // el propietario siempre administra; una cuenta, solo si lo es
   const [rolListo, setRolListo] = useState(!esTokenDeUsuario(token));  // hasta saber el rol no se pide nada del seguimiento
   useEffect(() => {
@@ -123,11 +124,11 @@ export default function Principal({ token, correo, biometria, version, onBiometr
   if (abierto) return <DetalleExpediente token={token} expediente={abierto} onVolver={() => setAbierto(null)} />;
 
   return <View style={{ flex: 1 }}>
-    <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
+    <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { if (esAdmin) setRecargaAdmin(n => n + 1); else void cargar(); }} tintColor={colores.marino} />}>
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
       {lento && refrescando && <Tarjeta><Text style={s.cuerpo}>Estamos preparando tu información. La primera carga del día puede tardar hasta un minuto.</Text></Tarjeta>}
-      {pestana === 'admin' && esAdmin && <><Titulo texto="Administración" subtitulo="Cuentas, invitaciones y accesos" /><Admin token={token} /></>}
+      {pestana === 'admin' && esAdmin && <><Titulo texto="Administración" subtitulo="Cuentas, invitaciones y accesos" /><Admin token={token} recarga={recargaAdmin} /></>}
       {pestana === 'inicio' && <Inicio estado={estado} nombre={nombre || primerNombre(nombreSigac)} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'novedades' && <Novedades novedades={novedades} expedientes={expedientes} token={token} onCambio={setNovedades} onExpedientes={setExpedientes}

@@ -77,6 +77,14 @@ export function Campo({ icono, etiqueta, valor, onCambio, secreto, teclado, mayu
   </View>;
 }
 
+/** Código de 6 dígitos: teclado numérico, solo dígitos (acepta pegar «123 456») y avisa en cuanto está completo. */
+export function CampoCodigo({ valor, onCambio, onCompleto, desactivado }: { valor: string; onCambio: (c: string) => void; onCompleto?: (c: string) => void; desactivado?: boolean }) {
+  return <TextInput accessibilityLabel="Código de 6 dígitos" value={valor} editable={!desactivado} autoFocus
+    onChangeText={t => { const d = t.replace(/\D/g, '').slice(0, 6); onCambio(d); if (d.length === 6) onCompleto?.(d); }}
+    keyboardType="number-pad" maxLength={7} autoComplete="one-time-code" textContentType="oneTimeCode" placeholder="000000" placeholderTextColor={colores.borde}
+    style={e.codigoCampo} />;
+}
+
 export function Esqueleto({ alto = 20, ancho = '100%', estilo }: { alto?: number; ancho?: number | `${number}%`; estilo?: ViewStyle }) {
   const opacidad = useRef(new Animated.Value(0.45)).current;
   useEffect(() => {
@@ -104,6 +112,7 @@ export function PantallaCarga({ texto }: { texto?: string }) {
 }
 
 export const e = StyleSheet.create({
+  codigoCampo: { fontSize: 36, fontWeight: '700', letterSpacing: 14, textAlign: 'center', color: colores.marino, borderWidth: 1.5, borderColor: colores.borde, borderRadius: radios.medio, backgroundColor: colores.superficie, paddingVertical: 14, marginBottom: espacio.m },
   campo: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: colores.borde, borderRadius: radios.pildora, paddingHorizontal: 16, backgroundColor: colores.superficie, marginBottom: espacio.m, minHeight: 52 },
   entrada: { flex: 1, fontSize: 16, color: colores.texto, paddingVertical: 12 },
   boton: { minHeight: 52, borderRadius: radios.pildora, paddingHorizontal: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },

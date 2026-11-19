@@ -91,7 +91,9 @@ export default function Ajustes(p: Props) {
         <FilaNav icono="document-text-outline" titulo="Privacidad y datos" detalle="Qué guardamos y tus derechos" onPress={() => p.onSeccion('privacidad')} />
         <FilaNav icono="information-circle-outline" titulo="Acerca de Tinotify" detalle={`Versión ${p.version}`} ultima onPress={() => p.onSeccion('acerca')} />
       </Tarjeta>
-      <Boton texto="Cerrar sesión" secundario icono="log-out-outline" onPress={() => { void p.onSalir(); }} />
+      <Boton texto="Cerrar sesión" secundario icono="log-out-outline" onPress={() => Alert.alert('¿Cerrar sesión?',
+        'Para volver a entrar tendrás que pedir un código a tu correo. Si solo quieres proteger la aplicación, activa la huella en Seguridad: no hace falta cerrar sesión.',
+        [{ text: 'Cancelar', style: 'cancel' }, { text: 'Cerrar sesión', style: 'destructive', onPress: () => { void p.onSalir(); } }])} />
     </>;
   }
 
