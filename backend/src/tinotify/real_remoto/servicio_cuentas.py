@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from tinotify.real_remoto import cuentas as c
 from tinotify.real_remoto.cifrado import CifradoNoValido, cifrar_correo, descifrar_correo
+from tinotify.real_remoto.plantillas_correo import correo_codigo
 
 DURACION_SESION = timedelta(days=30)
 DURACION_INVITACION = timedelta(days=7)
@@ -62,12 +63,8 @@ class ServicioCuentas:
         return codigo
 
     # --- envío de códigos ----------------------------------------------------------------------------------------
-    def _enviar_codigo(self, destino: str, codigo: str, asunto: str, frase: str, vigencia: str) -> str:
-        texto = f"{frase}: {codigo}\n\nVale {vigencia} y se usa una sola vez. Si no lo pediste, ignora este mensaje: nadie entra a tu cuenta sin este código."
-        html = ("<div style='font-family:Arial,sans-serif;color:#14213D;max-width:480px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
-                f"<p>{frase}:</p>"
-                f"<p style='font-size:28px;font-weight:700;letter-spacing:3px;margin:12px 0'>{codigo}</p>"
-                f"<p>Vale {vigencia} y se usa una sola vez. Si no lo pediste, ignora este mensaje: nadie entra a tu cuenta sin este código.</p></div>")
+    def _enviar_codigo(self, destino: str, codigo: str, motivo: str, vigencia: str) -> str:
+        asunto, texto, html = correo_codigo(codigo, motivo, vigencia)
         return "enviado" if self._correo.enviar(destino, asunto, texto, html) is None else "fallo_envio"
 
     def solicitar_codigo_registro(self, correo: str, invitacion: str) -> str:
@@ -85,7 +82,7 @@ class ServicioCuentas:
         if self._correo is None:
             return "fallo_envio"
         codigo = c.codigo_registro(self._llave, normalizado, invitacion, c.ventana_registro(ahora))
-        return self._enviar_codigo(normalizado, codigo, "Tu código para crear tu cuenta de Tinotify", "Tu código para crear tu cuenta de Tinotify es", "10 minutos")
+        return self._enviar_codigo(normalizado, codigo, "crear tu cuenta", "10 minutos")
 
     def solicitar_codigo_acceso(self, correo: str) -> str:
         """Manda un código de un solo uso para entrar. Estados: `enviado`, `no_registrado`, `limite` o `fallo_envio`. Es una beta cerrada: se
@@ -103,7 +100,7 @@ class ServicioCuentas:
         codigo = c.nuevo_codigo_acceso()
         if not self._a.crear_recuperacion(fila["id"], c.hash_codigo_acceso(fila["id"], codigo), ahora + DURACION_CODIGO_ACCESO, ahora, MAX_CODIGOS_HORA):
             return "limite"
-        return self._enviar_codigo(normalizado, codigo, "Tu código para entrar a Tinotify", "Tu código para entrar a Tinotify es", "15 minutos")
+        return self._enviar_codigo(normalizado, codigo, "entrar a tu cuenta", "15 minutos")
 
     def probar_correo(self):
         """Solo para el propietario: envía un correo de prueba al remitente. Devuelve (enviado, motivo)."""
