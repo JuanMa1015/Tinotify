@@ -1,0 +1,33 @@
+name: mantener-despierto
+
+# Evita que el servicio gratuito de Render se duerma mientras se usa la app: un GET a /health cada 10 minutos, SOLO de 8:00 a 17:59
+# (hora de Bogotá). Fuera de ese horario el servicio puede dormir (las revisiones de las 7:30, 12:30 y 18:30 lo despiertan solas).
+# Consumo en Render: ~10 h/día ≈ 300 h/mes de las 750 gratuitas, y 0 min de Actions (repositorio público). No lleva datos de nadie.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 8-17 * * *"
+      timezone: "America/Bogota"
+
+permissions: {}
+
+concurrency:
+  group: mantener-despierto
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Despertar el servicio (no falla si no responde)
+        env:
+          TINOTIFY_URL: ${{ vars.TINOTIFY_URL }}
+        run: |
+          case "$TINOTIFY_URL" in https://*) ;; *) echo "sin URL configurada"; exit 0 ;; esac
+          for intento in 1 2; do
+            codigo=$(curl -s -o /dev/null -w '%{http_code}' --max-time 70 "${TINOTIFY_URL%/}/health" || true)
+            echo "intento $intento: HTTP $codigo"
+            [ "$codigo" = "200" ] && exit 0
+          done
+          echo "el servicio no respondió; la próxima revisión lo reintentará"

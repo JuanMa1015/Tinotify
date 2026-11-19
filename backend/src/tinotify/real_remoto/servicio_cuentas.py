@@ -13,6 +13,8 @@ from tinotify.real_remoto.cifrado import CifradoNoValido, cifrar_correo, descifr
 DURACION_SESION = timedelta(days=30)
 DURACION_INVITACION = timedelta(days=7)
 MAX_FALLOS, BLOQUEO = 5, timedelta(minutes=15)
+DURACION_RECUPERACION = timedelta(minutes=15)
+MAX_RECUPERACIONES_HORA = 3
 
 
 class RegistroNoValido(Exception):
@@ -21,6 +23,10 @@ class RegistroNoValido(Exception):
 
 class CredencialesIncorrectas(Exception):
     pass
+
+
+class CodigoNoValido(Exception):
+    """Código de recuperación incorrecto, vencido, usado o con demasiados intentos (no se distingue a propósito)."""
 
 
 class CuentaBloqueada(Exception):
@@ -40,10 +46,11 @@ def _ahora() -> datetime:
 
 
 class ServicioCuentas:
-    def __init__(self, almacen, llave: bytes, *, reloj=_ahora, n_scrypt: int = c.N_SCRYPT, llave_correo: bytes | None = None):
+    def __init__(self, almacen, llave: bytes, *, reloj=_ahora, n_scrypt: int = c.N_SCRYPT, llave_correo: bytes | None = None, correo=None):
         if len(llave) < 32:
             raise ValueError("llave_corta")
         self._a, self._llave, self._reloj, self._n = almacen, llave, reloj, n_scrypt
+        self._correo = correo  # cliente de correo (Brevo) para el código de recuperación; None = recuperación desactivada
         self._llave_correo = llave_correo  # con ella, el correo se guarda CIFRADO para poder enviar los avisos
 
     # --- administración ------------------------------------------------------------------------------------------
@@ -100,6 +107,51 @@ class ServicioCuentas:
             return descifrar_correo(self._llave_correo, *guardado)
         except CifradoNoValido:
             return None
+
+    # --- recuperar la contraseña ---------------------------------------------------------------------------------
+    @property
+    def recuperacion_disponible(self) -> bool:
+        return self._correo is not None
+
+    def solicitar_recuperacion(self, correo: str) -> bool:
+        """Envía un código de un solo uso al correo de la cuenta. Devuelve si se envió, SOLO para el registro interno: la ruta responde
+        lo mismo exista o no la cuenta (no revela qué correos están registrados)."""
+        try:
+            normalizado = c.normalizar_correo(correo)
+        except c.DatosNoValidos:
+            return False
+        fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
+        if fila is None or not fila["activo"] or self._correo is None:
+            return False
+        ahora = self._reloj()
+        codigo = c.nuevo_codigo_recuperacion()
+        if not self._a.crear_recuperacion(fila["id"], c.hash_recuperacion(fila["id"], codigo), ahora + DURACION_RECUPERACION, ahora,
+                                          MAX_RECUPERACIONES_HORA):
+            return False  # demasiadas solicitudes seguidas para esta cuenta
+        texto = (f"Tu código para restablecer la contraseña de Tinotify es: {codigo}\n\nVale 15 minutos y se usa una sola vez. "
+                 "Si no lo pediste, ignora este mensaje: tu contraseña no cambia.")
+        html = ("<div style='font-family:Arial,sans-serif;color:#14213D;max-width:480px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
+                "<p>Tu código para restablecer la contraseña es:</p>"
+                f"<p style='font-size:28px;font-weight:700;letter-spacing:3px;margin:12px 0'>{codigo}</p>"
+                "<p>Vale 15 minutos y se usa una sola vez. Si no lo pediste, ignora este mensaje: tu contraseña no cambia.</p></div>")
+        return self._correo.enviar(normalizado, "Tu código para restablecer la contraseña de Tinotify", texto, html)
+
+    def restablecer_clave(self, correo: str, codigo: str, nueva: str) -> None:
+        """Cambia la contraseña con un código válido, cierra TODAS las sesiones y quita el bloqueo por intentos."""
+        try:
+            normalizado = c.normalizar_correo(correo)
+        except c.DatosNoValidos:
+            raise CodigoNoValido from None
+        c.validar_clave(nueva, normalizado)
+        fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
+        if fila is None or not fila["activo"]:
+            raise CodigoNoValido
+        ahora = self._reloj()
+        if not self._a.consumir_recuperacion(fila["id"], c.hash_recuperacion(fila["id"], codigo), ahora):
+            raise CodigoNoValido
+        self._a.cambiar_pass(fila["id"], c.hash_clave(nueva, n=self._n))
+        self._a.revocar_todas(fila["id"], ahora)
+        self._a.limpiar_fallos(fila["id"])
 
     # --- sesiones ------------------------------------------------------------------------------------------------
     def autenticar(self, token: str | None) -> Usuario | None:
