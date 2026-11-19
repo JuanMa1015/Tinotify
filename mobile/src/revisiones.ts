@@ -42,7 +42,7 @@ const CODIGOS: Record<string, string> = {
   casos_fallidos: 'Algunos expedientes no se pudieron leer en esta revisión.',
   sesion_ocupada: 'Había otro acceso a SIGAC en curso.',
   presupuesto_agotado: 'Demasiados accesos seguidos a SIGAC; se reintentará.',
-  interrumpida: 'La revisión se interrumpió (por ejemplo, por un reinicio del servidor).',
+  interrumpida: 'La revisión se interrumpió. Se repetirá en el próximo horario.',
 };
 
 export function resumenDeEstado(estado: EstadoMonitor, ahora: Date = new Date(), vigilarAtraso = false): Resumen {

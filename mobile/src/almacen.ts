@@ -33,7 +33,7 @@ export const borrarCorreo = () => SecureStore.deleteItemAsync(CLAVE_CORREO);
 // Nombre con el que la aplicación te saluda: lo escribes tú, vive solo en este teléfono y nunca se envía al servidor.
 const CLAVE_NOMBRE = 'tinotify.nombre.v1';
 // Nombre tomado de SIGAC (también solo en este teléfono) y cuándo se intentó leerlo, para no repetir el intento a cada apertura.
-const CLAVE_NOMBRE_SIGAC = 'tinotify.nombre-sigac.v1';
+const CLAVE_NOMBRE_SIGAC = 'tinotify.nombre-sigac.v2';
 export async function leerNombreSigac(): Promise<{ nombre: string; intento: number } | null> {
   try {
     const j = JSON.parse((await SecureStore.getItemAsync(CLAVE_NOMBRE_SIGAC)) ?? 'null') as { nombre?: unknown; intento?: unknown } | null;
@@ -41,6 +41,6 @@ export async function leerNombreSigac(): Promise<{ nombre: string; intento: numb
   } catch { return null; }
 }
 export const guardarNombreSigac = (nombre: string, intento: number) => SecureStore.setItemAsync(CLAVE_NOMBRE_SIGAC, JSON.stringify({ nombre, intento }));
-export const borrarNombres = async () => { await SecureStore.deleteItemAsync(CLAVE_NOMBRE_SIGAC); await SecureStore.deleteItemAsync('tinotify.nombre.v1'); };
+export const borrarNombres = async () => { await SecureStore.deleteItemAsync(CLAVE_NOMBRE_SIGAC); await SecureStore.deleteItemAsync('tinotify.nombre-sigac.v1'); await SecureStore.deleteItemAsync('tinotify.nombre.v1'); };
 export const leerNombre = () => SecureStore.getItemAsync(CLAVE_NOMBRE);
 export const guardarNombre = (nombre: string) => (nombre === '' ? SecureStore.deleteItemAsync(CLAVE_NOMBRE) : SecureStore.setItemAsync(CLAVE_NOMBRE, nombre));

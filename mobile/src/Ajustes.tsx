@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Linking, Pressable, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Aviso, Boton, Campo, Etiqueta, Tarjeta, Titulo, type Icono } from './componentes';
-import { ErrorApi, crearInvitacion, enviarPrueba, olvidarCredenciales } from './api';
+import { ErrorApi, crearInvitacion, enviarPrueba, olvidarCredenciales, probarCorreo } from './api';
 import { biometriaDisponible } from './almacen';
 import { URL_POLITICA, URL_TERMINOS } from './cuentas';
 import { activarPush, desactivarPush, pushActivo } from './notificaciones';
@@ -45,6 +45,14 @@ export default function Ajustes(p: Props) {
     } catch (err) { setError(mensajeDe(err, 'No se pudo enviar la notificación de prueba.')); }
   }
 
+  async function probarElCorreo() {
+    try {
+      const r = await probarCorreo(p.token);
+      if (r.enviado) { setError(''); Alert.alert('Correo enviado', 'Revisa la bandeja (y el spam) del correo remitente configurado en Brevo.'); }
+      else setError(`No se pudo enviar el correo de prueba: ${r.motivo ?? 'motivo desconocido'}`);
+    } catch (err) { setError(mensajeDe(err, 'No se pudo enviar el correo de prueba.')); }
+  }
+
   async function invitar() {
     try {
       const r = await crearInvitacion(p.token);
@@ -53,7 +61,7 @@ export default function Ajustes(p: Props) {
   }
 
   function confirmarOlvidar() {
-    Alert.alert('Olvidar mis credenciales de SIGAC', 'Se borran del servidor tu usuario y clave de SIGAC y tu estado de seguimiento. Tinotify dejará de revisar tu cuenta hasta que la conectes de nuevo.', [
+    Alert.alert('Desconectar mi cuenta de SIGAC', 'Se borran tu usuario y clave de SIGAC y tu estado de seguimiento. Tinotify dejará de revisar tu cuenta hasta que la conectes de nuevo.', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Borrar', style: 'destructive', onPress: () => { olvidarCredenciales(p.token).then(p.onSalir, err => setError(mensajeDe(err))); } },
     ]);
@@ -116,7 +124,7 @@ export default function Ajustes(p: Props) {
         <Texto>Al cambiarla se cierra la sesión en tus otros dispositivos.</Texto>
         <Zona titulo="Zona de riesgo">
           <Boton texto="Eliminar mi cuenta" peligro icono="trash-outline" onPress={() => p.onCuenta('eliminar')} />
-          <Texto>Borra tu cuenta y todos tus datos del servidor. No se puede deshacer.</Texto>
+          <Texto>Borra tu cuenta y todos tus datos. No se puede deshacer.</Texto>
         </Zona>
       </> : <>
         <Tarjeta>
@@ -136,13 +144,13 @@ export default function Ajustes(p: Props) {
           <Text style={[s.fuerte, { flex: 1 }]}>Estado</Text>
           <Etiqueta texto={conectada ? 'Conectada' : 'Sin conectar'} tono={conectada ? 'lima' : 'rojo'} />
         </View>
-        <Text style={s.cuerpo}>{conectada ? 'Tinotify revisa tu cuenta de SIGAC tres veces al día (7:30, 12:30 y 18:30).' : 'No hay credenciales guardadas, así que no se revisa nada.'}</Text>
+        <Text style={s.cuerpo}>{conectada ? 'Tinotify revisa tu cuenta de SIGAC tres veces al día (7:30, 12:30 y 18:30).' : 'Aún no has conectado tu cuenta de SIGAC, así que no se revisa nada.'}</Text>
       </Tarjeta>
       <Boton texto={conectada ? 'Actualizar mi clave de SIGAC' : 'Conectar SIGAC'} icono="key-outline" onPress={p.onReconectar} />
       <Texto>Úsalo si cambiaste tu clave en SIGAC: mientras no la actualices, las revisiones fallarán.</Texto>
       {conectada && <Zona titulo="Zona de riesgo">
-        <Boton texto="Olvidar mis credenciales" peligro icono="trash-outline" onPress={confirmarOlvidar} />
-        <Texto>Borra del servidor tu usuario y clave de SIGAC y el estado de seguimiento.</Texto>
+        <Boton texto="Desconectar mi cuenta de SIGAC" peligro icono="trash-outline" onPress={confirmarOlvidar} />
+        <Texto>Borra tu usuario y clave de SIGAC y el estado de seguimiento.</Texto>
       </Zona>}
     </>;
   }
@@ -157,6 +165,10 @@ export default function Ajustes(p: Props) {
         <Text style={s.fuerte}>Correo</Text>
         <Text style={s.cuerpo}>Si tu cuenta tiene un correo registrado, los avisos también llegan allí en el ciclo de las 7:30, 12:30 y 18:30.</Text>
       </Tarjeta>
+      {!p.usuario && <>
+        <Boton texto="Enviar correo de prueba (recuperación)" secundario icono="mail-outline" onPress={() => { void probarElCorreo(); }} />
+        <Texto>Solo para ti como propietario: comprueba que el correo de recuperación de contraseña sale por Brevo y, si falla, muestra el motivo.</Texto>
+      </>}
       <Text style={s.pequeno}>Un teléfono recibe las notificaciones de una sola cuenta a la vez: la última que las active.</Text>
     </>;
   }
@@ -173,7 +185,7 @@ export default function Ajustes(p: Props) {
     return <>{volver}<Titulo texto="Privacidad y datos" />
       <Tarjeta>
         <Text style={s.fuerte}>Qué guardamos</Text>
-        <Text style={s.cuerpo}>Tu usuario y clave de SIGAC, cifrados en el servidor; nunca en este teléfono. La lista de tus expedientes (radicado, nombre y estado), cifrada. Una ficha corta de cada actuación nueva (fecha, etapa y extracto), cifrada y por 90 días. Resúmenes cifrados para detectar cambios y conteos de cada revisión.</Text>
+        <Text style={s.cuerpo}>Tu usuario y clave de SIGAC, cifrados; nunca en este teléfono. La lista de tus expedientes (radicado, nombre y estado), cifrada. Una ficha corta de cada actuación nueva (fecha, etapa y extracto), cifrada y por 90 días. Resúmenes cifrados para detectar cambios y conteos de cada revisión.</Text>
       </Tarjeta>
       <Tarjeta>
         <Text style={s.fuerte}>Qué no guardamos</Text>
@@ -211,7 +223,11 @@ function Interruptor({ titulo, detalle, valor, onCambio, desactivado }: { titulo
       <Text style={s.fuerte}>{titulo}</Text>
       <Text style={s.cuerpo}>{detalle}</Text>
     </View>
-    <Switch value={valor} disabled={desactivado} onValueChange={v => { void onCambio(v); }} accessibilityLabel={titulo} trackColor={{ true: colores.marino }} thumbColor={colores.blanco} />
+    <View style={{ alignItems: 'center', gap: 2, opacity: desactivado ? 0.5 : 1 }}>
+      <Switch value={valor} disabled={desactivado} onValueChange={v => { void onCambio(v); }} accessibilityLabel={`${titulo}: ${valor ? 'activado' : 'desactivado'}`}
+        trackColor={{ false: '#AEBBD3', true: colores.marino }} thumbColor={valor ? colores.lima : '#5B6B88'} ios_backgroundColor="#AEBBD3" />
+      <Text style={[s.estadoInterruptor, { color: valor ? '#3F7D1A' : colores.textoSuave }]}>{valor ? 'Activado' : 'Desactivado'}</Text>
+    </View>
   </View>;
 }
 
@@ -221,6 +237,7 @@ const Zona = ({ titulo, children }: { titulo: string; children: React.ReactNode 
 const s = StyleSheet.create({
   perfil: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: colores.marino, alignItems: 'center', justifyContent: 'center' },
+  estadoInterruptor: { fontSize: 12, fontWeight: '700' },
   perfilNombre: { fontSize: 18, fontWeight: '700', color: colores.texto },
   filaNav: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingVertical: 14 },
   filaNavLinea: { borderBottomWidth: 1, borderBottomColor: colores.borde },

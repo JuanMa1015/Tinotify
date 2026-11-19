@@ -11,9 +11,9 @@ export class ErrorApi extends Error {
 
 const MENSAJES: Record<number, string> = {
   401: 'El código de acceso no es válido.',
-  403: 'El servidor rechazó la conexión.',
+  403: 'No se pudo completar la conexión.',
   409: 'Ya hay un acceso en curso. Espera un momento.',
-  412: 'No hay credenciales guardadas.',
+  412: 'Aún no has conectado tu cuenta de SIGAC.',
   422: 'SIGAC no devolvió lo esperado para esta cuenta.',
   429: 'Demasiados intentos. Espera unos minutos.',
   502: 'SIGAC no aceptó los datos o no respondió.',
@@ -38,7 +38,7 @@ async function solicitar<T>(ruta: string, token: string | undefined, opciones: {
     return (r.status === 204 ? undefined : await r.json()) as T;
   } catch (e) {
     if (e instanceof ErrorApi) throw e;
-    throw new ErrorApi('Sin conexión con el servidor. El primer intento puede tardar hasta un minuto; reintenta.', null);
+    throw new ErrorApi('No hay conexión con Tinotify. Revisa tu internet; el primer intento del día puede tardar hasta un minuto. Reintenta.', null);
   } finally { clearTimeout(temporizador); }
 }
 
@@ -91,7 +91,10 @@ export const cambiarClave = (token: string, actual: string, nueva: string) => so
 export const eliminarCuenta = (token: string, clave: string) => solicitar<{ borrada: boolean }>('/auth/cuenta', token, { metodo: 'DELETE', cuerpo: { clave } });
 // Recuperar la contraseña: el servidor envía un código de un solo uso al correo (siempre responde igual, exista o no la cuenta).
 export const recuperacionDisponible = () => solicitar<{ disponible: boolean }>('/auth/recuperacion', undefined, { limiteMs: 60000 });
-export const solicitarRecuperacion = (correo: string) => solicitar<{ solicitado: boolean }>('/auth/recuperar', undefined, { cuerpo: { correo }, limiteMs: 60000 });
+export type EstadoRecuperacion = 'enviado' | 'no_registrado' | 'limite' | 'fallo_envio';
+export const solicitarRecuperacion = (correo: string) => solicitar<{ estado: EstadoRecuperacion }>('/auth/recuperar', undefined, { cuerpo: { correo }, limiteMs: 60000 });
+// Solo el propietario: manda un correo de prueba y, si falla, dice el motivo que da el proveedor.
+export const probarCorreo = (token: string) => solicitar<{ enviado: boolean; motivo: string | null }>('/auth/correo/prueba', token, { cuerpo: {}, limiteMs: 60000 });
 export const restablecerClave = (correo: string, codigo: string, clave: string) =>
   solicitar<{ restablecida: boolean }>('/auth/restablecer', undefined, { cuerpo: { correo, codigo, clave }, limiteMs: 60000 });
 export const crearInvitacion = (token: string) => solicitar<{ codigo: string; vigencia_dias: number }>('/auth/invitaciones', token, { cuerpo: {} });
@@ -103,7 +106,7 @@ export async function descargarAnexo(token: string, id: string, actuacion: numbe
   try {
     r = await FileSystem.downloadAsync(`${baseURL}/real/expedientes/${id}/actuaciones/${actuacion}/anexos/${anexo}`, destino,
       { headers: { Authorization: `Bearer ${token}` } });
-  } catch { throw new ErrorApi('Sin conexión con el servidor. Reintenta en un momento.', null); }
+  } catch { throw new ErrorApi('No hay conexión con Tinotify. Reintenta en un momento.', null); }
   if (r.status !== 200) {
     await FileSystem.deleteAsync(destino, { idempotent: true });
     throw new ErrorApi(r.status === 404 ? 'El anexo ya no está disponible: cierra el expediente y ábrelo de nuevo.' :

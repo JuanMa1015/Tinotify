@@ -11,10 +11,10 @@ export function Boton({ texto, onPress, cargando, desactivado, secundario, icono
 }) {
   const inactivo = desactivado || cargando;
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled: !!inactivo, busy: !!cargando }} onPress={inactivo ? undefined : onPress}
-    style={({ pressed }) => [e.boton, peligro ? e.botonPeligro : secundario ? e.botonSec : e.botonPri, inactivo && e.botonOff, pressed && { opacity: 0.85 }]}>
+    style={({ pressed }) => [e.boton, peligro ? e.botonPeligro : secundario ? e.botonSec : e.botonPri, inactivo && e.botonOff, desactivado && !cargando && e.botonApagado, pressed && { opacity: 0.85 }]}>
     {cargando ? <ActivityIndicator color={secundario ? colores.marino : colores.blanco} /> : <>
-      <Text style={[e.botonTxt, secundario && { color: colores.marino }, peligro && { color: colores.error }]}>{texto}</Text>
-      {icono && <Ionicons name={icono} size={20} color={peligro ? colores.error : secundario ? colores.marino : colores.lima} />}
+      <Text style={[e.botonTxt, secundario && { color: colores.marino }, peligro && { color: colores.error }, desactivado && { color: '#6B7A94' }]}>{texto}</Text>
+      {icono && <Ionicons name={icono} size={20} color={desactivado ? '#6B7A94' : peligro ? colores.error : secundario ? colores.marino : colores.lima} />}
     </>}
   </Pressable>;
 }
@@ -107,7 +107,7 @@ export const e = StyleSheet.create({
   entrada: { flex: 1, fontSize: 16, color: colores.texto, paddingVertical: 12 },
   boton: { minHeight: 52, borderRadius: radios.pildora, paddingHorizontal: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   botonPri: { backgroundColor: colores.marino }, botonSec: { backgroundColor: colores.azulChip, borderWidth: 1, borderColor: colores.borde },
-  botonPeligro: { backgroundColor: colores.blanco, borderWidth: 1, borderColor: colores.error }, botonOff: { opacity: 0.5 }, botonTxt: { color: colores.blanco, fontSize: 17, fontWeight: '600' },
+  botonPeligro: { backgroundColor: colores.blanco, borderWidth: 1, borderColor: colores.error }, botonOff: { opacity: 0.5 }, botonApagado: { opacity: 1, backgroundColor: '#E1E7F2', borderWidth: 1, borderColor: '#B9C4D8', borderStyle: 'dashed' }, botonTxt: { color: colores.blanco, fontSize: 17, fontWeight: '600' },
   tarjeta: { backgroundColor: colores.tarjeta, borderRadius: radios.medio, padding: espacio.l, borderWidth: 1, borderColor: colores.borde, marginBottom: espacio.m },
   etiqueta: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radios.pildora }, etiquetaTxt: { fontSize: 13, fontWeight: '600' },
   titulo: { fontSize: 34, fontWeight: '700', color: colores.texto, lineHeight: 40 }, subtitulo: { fontSize: 16, color: colores.textoSuave, marginTop: 4 },
