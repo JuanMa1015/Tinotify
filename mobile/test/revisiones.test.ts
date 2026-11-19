@@ -90,3 +90,26 @@ test('la dirección de la actuación se reconoce sin importar mayúsculas', () =
   assert.equal(tipoDireccion(' Asesor ', 'estudiante'), 'asesor_estudiante');
   assert.equal(tipoDireccion('X', 'Y'), 'otra');
 });
+
+
+import { tonoDeEstado } from '../src/revisiones.ts';
+
+test('una revisión que quedó en curso mucho tiempo se muestra como interrumpida y los códigos se explican', () => {
+  const base = { credenciales_guardadas: true, expedientes_en_estado: 15, avisos_pendientes: 0 };
+  const con = (resultado: string, inicio: string, codigo: string | null = null) => resumenDeEstado({ ...base, ultima_ejecucion: { resultado, inicio, fin: null, codigo } }, new Date('2026-11-18T05:00:00Z'));
+  assert.equal(con('en_curso', '2026-11-18T04:55:00Z').titulo, 'Revisión en curso');
+  assert.equal(con('en_curso', '2026-11-18T04:55:00Z').requiereAtencion, false);
+  assert.equal(con('en_curso', '2026-11-18T04:30:00Z').titulo, 'Revisión interrumpida');
+  assert.equal(con('ok', '2026-11-18T04:30:00Z', 'casos_fallidos').titulo, 'Revisión parcial');
+  assert.match(con('error_interno', '2026-11-18T04:30:00Z', 'presupuesto_agotado').detalle, /Demasiados accesos/);
+  assert.equal(con('error_interno', '2026-11-18T04:30:00Z', 'interrumpida').titulo, 'Revisión interrumpida');
+  assert.equal(con('error_interno', '2026-11-18T04:30:00Z').titulo, 'Revisión con problemas');
+});
+
+test('el estado del expediente se clasifica para colorearlo', () => {
+  assert.equal(tonoDeEstado('En proceso'), 'proceso');
+  assert.equal(tonoDeEstado(' EN PROCESO '), 'proceso');
+  assert.equal(tonoDeEstado('Terminado'), 'cerrado');
+  assert.equal(tonoDeEstado('Archivado'), 'cerrado');
+  assert.equal(tonoDeEstado('Reparto'), 'otro');
+});

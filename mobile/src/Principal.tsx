@@ -9,7 +9,7 @@ import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titul
 import { ErrorApi, descargarAnexo, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, type Actuacion, type Expediente } from './api';
 import { type Destino } from './notificaciones';
 import {
-  canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
+  canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, tonoDeEstado, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
 import { colores, espacio, radios } from './tema';
 
@@ -213,6 +213,16 @@ function Actividad({ ejecuciones }: { ejecuciones?: Ejecucion[] }) {
   </>;
 }
 
+function EstadoExpediente({ estado }: { estado: string }) {
+  const tono = tonoDeEstado(estado);
+  const c = tono === 'proceso' ? { fondo: '#FFF1D6', texto: '#7A4F00', punto: '#E39B00' }
+    : tono === 'cerrado' ? { fondo: '#E7EAF0', texto: '#3D4A60', punto: '#8A97AB' } : { fondo: colores.azulChip, texto: colores.marino, punto: colores.marinoSuave };
+  return <View accessibilityLabel={`Estado: ${estado}`} style={[s.estadoChip, { backgroundColor: c.fondo }]}>
+    <View style={[s.punto, { backgroundColor: c.punto }]} />
+    <Text style={[s.estadoTxt, { color: c.texto }]}>{estado}</Text>
+  </View>;
+}
+
 function Anexo({ anexo, token, expediente, actuacion, indice }: { anexo: Actuacion['anexos'][number]; token: string; expediente: string; actuacion: number; indice: number }) {
   const disponible = anexo.con_enlace === true;
   const [bajando, setBajando] = useState(false);
@@ -288,8 +298,11 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
         <Text style={s.radicado}>RADICADO {expediente.numero}</Text>
         <Text accessibilityRole="header" style={s.clienteGrande}>{expediente.cliente}</Text>
         <View style={s.chips}>
-          <Etiqueta texto={expediente.estado} tono="azul" />
-          {actuaciones && <Etiqueta texto={`${actuaciones.length} ${actuaciones.length === 1 ? 'actuación' : 'actuaciones'}`} tono="azul" />}
+          <EstadoExpediente estado={expediente.estado} />
+          {actuaciones && <View accessibilityLabel={`${actuaciones.length} actuaciones`} style={s.cuenta}>
+            <Ionicons name="documents-outline" size={16} color={colores.marino} />
+            <Text style={s.cuentaTxt}>{actuaciones.length} {actuaciones.length === 1 ? 'actuación' : 'actuaciones'}</Text>
+          </View>}
         </View>
       </View>
       {error !== '' && <><Aviso texto={error} /><Boton texto="Reintentar" secundario icono="refresh-outline" onPress={() => setIntento(n => n + 1)} /></>}
@@ -329,6 +342,10 @@ const s = StyleSheet.create({
   fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   volver: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12 },
   cabecera: { marginBottom: espacio.l },
+  estadoChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: radios.pildora },
+  estadoTxt: { fontSize: 14, fontWeight: '700' }, punto: { width: 9, height: 9, borderRadius: 5 },
+  cuenta: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: radios.chico, borderWidth: 1, borderColor: colores.borde, backgroundColor: colores.blanco },
+  cuentaTxt: { fontSize: 14, fontWeight: '600', color: colores.marino },
   radicado: { fontSize: 13, fontWeight: '700', color: colores.textoSuave, letterSpacing: 0.8 },
   clienteGrande: { fontSize: 26, fontWeight: '700', color: colores.texto, lineHeight: 32, marginTop: 4 },
   fuerteChico: { fontSize: 15, fontWeight: '700', color: colores.texto },
