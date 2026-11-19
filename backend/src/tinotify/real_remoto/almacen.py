@@ -1,12 +1,16 @@
 """Almacén PostgreSQL (Supabase) del monitor real: esquema `tinotify_real`, solo con el login restringido.
 
-Una conexión por operación (hay ~3 ejecuciones al día): sin pool, sin estado compartido. TLS `verify-full` con la CA explícita.
+Cada operación es una transacción. Abrir una conexión con TLS `verify-full` y autenticación cuesta cientos de milisegundos, y la app
+hace varias consultas por pantalla, así que se reservan unas pocas conexiones inactivas (como mucho 3, hasta 45 s) para reutilizarlas.
+Una conexión que la base ya cerró se descarta y se abre otra sin que quien llama lo note. TLS `verify-full` con la CA explícita.
 Los mensajes de error nunca incluyen SQL, parámetros, credenciales ni datos: solo un tipo de fallo estable.
 """
 
 from collections import Counter
 import copy
 from contextlib import contextmanager
+import threading
+import time
 
 from tinotify.real_remoto.config import ConfigPg
 from tinotify.real_remoto.monitor import EstadoPrevio, planificar
@@ -22,10 +26,46 @@ class AlmacenIncompatible(Exception):
     """El esquema no es el esperado (marca de entorno ausente o de otra versión)."""
 
 
+MAX_INACTIVAS = 3
+EDAD_MAXIMA_S = 45  # una conexión inactiva más vieja se descarta: el balanceador o la base suelen cerrarlas pasado un rato
+
+
+def _cerrar(con):
+    try:
+        con.close()
+    except Exception:  # noqa: BLE001 - cerrar nunca debe romper la operación
+        pass
+
+
+class _Reserva:
+    """Conexiones inactivas listas para reutilizar. Una conexión está en manos de UN solo hilo a la vez (se saca de la lista al tomarla)."""
+
+    def __init__(self, maximo=MAX_INACTIVAS, edad_s=EDAD_MAXIMA_S, reloj=time.monotonic):
+        self._maximo, self._edad, self._reloj = maximo, edad_s, reloj
+        self._cierre, self._libres = threading.Lock(), []
+
+    def tomar(self):
+        with self._cierre:
+            while self._libres:
+                con, desde = self._libres.pop()
+                if self._reloj() - desde <= self._edad and not con.closed:
+                    return con
+                _cerrar(con)
+        return None
+
+    def devolver(self, con):
+        with self._cierre:
+            if len(self._libres) < self._maximo and not con.closed:
+                self._libres.append((con, self._reloj()))
+                return
+        _cerrar(con)
+
+
 class AlmacenPg:
     def __init__(self, config: ConfigPg):
         self._c = config
         self._u = None  # dueño de los datos: None = propietario (tu cuenta de siempre); si no, el id de un usuario
+        self._reserva = _Reserva()  # compartida por las vistas de `de()` (copy.copy conserva la referencia)
 
     def de(self, usuario):
         """Vista del almacén ligada a un usuario (None = propietario). Comparte la configuración; no abre conexiones."""
@@ -37,25 +77,50 @@ class AlmacenPg:
         with self._tx() as con:
             return [str(f[0]) for f in con.execute("SELECT usuario_id FROM tinotify_real.credenciales_usuario ORDER BY creado_en").fetchall()]
 
+    def _conexion(self, psycopg):
+        """Una conexión con la transacción ya abierta (tiempos límite fijados). Reutiliza una inactiva; si la base ya la cerró, abre otra."""
+        c = self._c
+        for intento in (0, 1):
+            con = self._reserva.tomar() if intento == 0 else None
+            reutilizada = con is not None
+            try:
+                if con is None:
+                    con = psycopg.connect(
+                        host=c.host, port=c.puerto, dbname=c.base, user=c.usuario, password=c.password,
+                        sslmode="verify-full" if c.tls else "disable", sslrootcert=str(c.ca) if c.tls and c.ca else None,
+                        connect_timeout=max(1, int(c.espera_s)), application_name="tinotify-real")
+                con.execute("SET LOCAL statement_timeout = '30s'")
+                con.execute("SET LOCAL lock_timeout = '10s'")
+                return con
+            except psycopg.Error:
+                if con is not None:
+                    _cerrar(con)
+                if not reutilizada:
+                    raise AlmacenNoDisponible from None
+        raise AlmacenNoDisponible
+
     @contextmanager
     def _tx(self):
-        c = self._c
         try:
             import psycopg  # carga perezosa: la biblioteca nativa solo se necesita al usar la base
         except ImportError:
             raise AlmacenNoDisponible from None
+        con = self._conexion(psycopg)
         try:
-            with psycopg.connect(
-                host=c.host, port=c.puerto, dbname=c.base, user=c.usuario, password=c.password,
-                sslmode="verify-full" if c.tls else "disable", sslrootcert=str(c.ca) if c.tls and c.ca else None,
-                connect_timeout=max(1, int(c.espera_s)), application_name="tinotify-real",
-            ) as con:
-                with con.cursor() as cur:
-                    cur.execute("SET LOCAL statement_timeout = '30s'")
-                    cur.execute("SET LOCAL lock_timeout = '10s'")
-                yield con
+            yield con
+            con.commit()
         except psycopg.Error:
+            _cerrar(con)
             raise AlmacenNoDisponible from None
+        except BaseException:
+            try:
+                con.rollback()  # un error de dominio (p. ej. invitación inválida) deshace la transacción; la conexión sigue sirviendo
+            except psycopg.Error:
+                _cerrar(con)
+                raise
+            self._reserva.devolver(con)
+            raise
+        self._reserva.devolver(con)
 
     def verificar(self):
         with self._tx() as con:

@@ -95,7 +95,7 @@ def _preparar(config, politica, referencia):
 
 
 def crear_app(config: Config | None = None, *, politica=None, referencia=None, historial=None,
-              fabrica_cliente=SigacClient, reloj=time.monotonic, almacen=None, clave_acreditacion=None, almacen_cuentas=None):
+              fabrica_cliente=SigacClient, reloj=time.monotonic, almacen=None, clave_acreditacion=None, almacen_cuentas=None, correo_cliente=None):
     config = config or Config.desde_entorno()  # el proceso no arranca con una configuración insegura
     politica, referencia = _preparar(config, politica, referencia)
     historial = historial or HistorialTemporal(reloj=reloj, temporizador=True)
@@ -129,7 +129,11 @@ def crear_app(config: Config | None = None, *, politica=None, referencia=None, h
             from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg  # carga perezosa: solo si las cuentas están activas
             llave_cuentas = hashlib.sha256(b"tinotify-cuentas|" + config.monitor.clave_cifrado).digest()
             llave_correo = hashlib.sha256(b"tinotify-correo|" + config.monitor.clave_cifrado).digest()
-            servicio_cuentas = ServicioCuentas(almacen_cuentas or AlmacenCuentasPg(config.monitor.pg), llave_cuentas, llave_correo=llave_correo)
+            if correo_cliente is None and config.correo_api is not None:
+                from tinotify.real_remoto.correo_brevo import ClienteBrevo
+                correo_cliente = ClienteBrevo(*config.correo_api)
+            servicio_cuentas = ServicioCuentas(almacen_cuentas or AlmacenCuentasPg(config.monitor.pg), llave_cuentas, llave_correo=llave_correo,
+                                               correo=correo_cliente)
             servicios.resolver_correo = servicio_cuentas.correo_de
     for biblioteca in ("httpx", "httpcore"):
         logging.getLogger(biblioteca).setLevel(logging.CRITICAL)  # sus mensajes incluyen URLs institucionales

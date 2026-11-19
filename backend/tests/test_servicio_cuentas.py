@@ -58,6 +58,27 @@ class AlmacenMemoria:
 
     def cambiar_pass(self, uid, ph): self.usuarios[uid]["pass_hash"] = ph
 
+    def crear_recuperacion(self, uid, h, expira, ahora, maximo=3):
+        filas = self.__dict__.setdefault("recuperaciones", [])
+        if sum(1 for f in filas if f["uid"] == uid and f["creada"] > ahora - timedelta(hours=1)) >= maximo:
+            return False
+        for f in filas:
+            if f["uid"] == uid and f["usado"] is None:
+                f["usado"] = ahora
+        filas.append({"uid": uid, "hash": h, "expira": expira, "usado": None, "intentos": 0, "creada": ahora})
+        return True
+
+    def consumir_recuperacion(self, uid, h, ahora, max_intentos=5):
+        vigentes = [f for f in self.__dict__.get("recuperaciones", []) if f["uid"] == uid and f["usado"] is None and f["expira"] > ahora]
+        if not vigentes or vigentes[-1]["intentos"] >= max_intentos:
+            return False
+        f = vigentes[-1]
+        if f["hash"] == h:
+            f["usado"] = ahora
+            return True
+        f["intentos"] += 1
+        return False
+
     def borrar_usuario(self, uid):
         self.usuarios.pop(uid, None)
         self.sesiones = {k: s for k, s in self.sesiones.items() if s["uid"] != uid}

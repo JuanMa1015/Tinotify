@@ -25,7 +25,7 @@ def mundo():
                    e["TINOTIFY_TEST_PG_PASSWORD"], None, tls=False)
     admin = psycopg.connect(host=cfg.host, port=cfg.puerto, dbname="postgres", user=e["TINOTIFY_TEST_PG_ADMIN_USER"],
                             password=e["TINOTIFY_TEST_PG_ADMIN_PASSWORD"], autocommit=True)
-    admin.execute("TRUNCATE tinotify_real.huellas, tinotify_real.estado_expediente, tinotify_real.avisos, tinotify_real.ejecuciones, "
+    admin.execute("TRUNCATE tinotify_real.recuperaciones, tinotify_real.huellas, tinotify_real.estado_expediente, tinotify_real.avisos, tinotify_real.ejecuciones, "
                   "tinotify_real.dispositivos, tinotify_real.credenciales, tinotify_real.sesiones, tinotify_real.invitaciones, "
                   "tinotify_real.usuarios CASCADE")
     usuarios = []
@@ -118,3 +118,24 @@ def test_las_novedades_son_de_su_dueno_se_marcan_vistas_y_caen_con_la_cuenta(mun
     assert len(v1.novedades()) == 1
     admin.execute("DELETE FROM tinotify_real.usuarios WHERE id = %s::uuid", (u1,))
     assert admin.execute("SELECT count(*) FROM tinotify_real.novedades").fetchone()[0] == 0
+
+
+def test_la_recuperacion_guarda_solo_el_hash_limita_por_hora_y_cuenta_los_intentos(mundo):
+    from datetime import datetime, timedelta, timezone
+    from tinotify.real_remoto.almacen_cuentas import AlmacenCuentasPg
+    base, admin, (u1, u2) = mundo
+    a = AlmacenCuentasPg(base._c)
+    ahora = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    h1, h2 = "a" * 64, "b" * 64
+    assert a.crear_recuperacion(u1, h1, ahora + timedelta(minutes=15), ahora) is True
+    assert a.consumir_recuperacion(u2, h1, ahora) is False                      # otro usuario no puede usarlo
+    for _ in range(5):
+        assert a.consumir_recuperacion(u1, h2, ahora) is False                  # cada fallo cuenta
+    assert a.consumir_recuperacion(u1, h1, ahora) is False                      # tras 5 fallos el código muere
+    assert a.crear_recuperacion(u1, h2, ahora + timedelta(minutes=15), ahora) is True   # uno nuevo anula el anterior
+    assert a.consumir_recuperacion(u1, h2, ahora + timedelta(minutes=16)) is False      # vencido
+    assert a.crear_recuperacion(u1, h1, ahora + timedelta(minutes=15), ahora) is True
+    assert a.crear_recuperacion(u1, h2, ahora + timedelta(minutes=15), ahora) is False  # la 4.ª en una hora
+    assert a.consumir_recuperacion(u1, h1, ahora) is True and a.consumir_recuperacion(u1, h1, ahora) is False  # un solo uso
+    admin.execute("DELETE FROM tinotify_real.usuarios WHERE id = %s::uuid", (u1,))
+    assert admin.execute("SELECT count(*) FROM tinotify_real.recuperaciones").fetchone()[0] == 0

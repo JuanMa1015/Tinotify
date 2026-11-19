@@ -4,6 +4,8 @@ Reutiliza la conexión restringida de AlmacenPg. Las operaciones compuestas son 
 NO probado contra una base real todavía: se valida en un contenedor Linux con PostgreSQL desechable (la biblioteca nativa de PostgreSQL no carga en este Windows).
 """
 
+import hmac
+
 from tinotify.real_remoto.almacen import AlmacenPg
 from tinotify.real_remoto.servicio_cuentas import RegistroNoValido
 
@@ -83,6 +85,32 @@ class AlmacenCuentasPg(AlmacenPg):
         with self._tx() as con:
             con.execute("UPDATE tinotify_real.sesiones SET revocada_en = %s WHERE usuario_id = %s AND token_hash <> %s AND revocada_en IS NULL",
                         (ahora, usuario_id, token_hash))
+
+    def crear_recuperacion(self, usuario_id, codigo_hash, expira_en, ahora, maximo_por_hora=3):
+        """Guarda un código de recuperación (solo su hash). False si ya hubo `maximo_por_hora` solicitudes en la última hora. Anula el anterior."""
+        with self._tx() as con:
+            con.execute("DELETE FROM tinotify_real.recuperaciones WHERE creada_en < %s - interval '1 day'", (ahora,))
+            hechas = con.execute("SELECT count(*) FROM tinotify_real.recuperaciones WHERE usuario_id = %s::uuid "
+                                 "AND creada_en > %s - interval '1 hour'", (usuario_id, ahora)).fetchone()[0]
+            if hechas >= maximo_por_hora:
+                return False
+            con.execute("UPDATE tinotify_real.recuperaciones SET usado_en = %s WHERE usuario_id = %s::uuid AND usado_en IS NULL", (ahora, usuario_id))
+            con.execute("INSERT INTO tinotify_real.recuperaciones (usuario_id, codigo_hash, expira_en, creada_en) VALUES (%s::uuid, %s, %s, %s)",
+                        (usuario_id, codigo_hash, expira_en, ahora))
+            return True
+
+    def consumir_recuperacion(self, usuario_id, codigo_hash, ahora, max_intentos=5):
+        """True (y queda usado) si el hash es el del código vigente de esa cuenta. Cada fallo cuenta; tras `max_intentos` el código muere."""
+        with self._tx() as con:
+            fila = con.execute("SELECT id, codigo_hash, intentos FROM tinotify_real.recuperaciones WHERE usuario_id = %s::uuid "
+                               "AND usado_en IS NULL AND expira_en > %s ORDER BY creada_en DESC LIMIT 1 FOR UPDATE", (usuario_id, ahora)).fetchone()
+            if fila is None or fila[2] >= max_intentos:
+                return False
+            if hmac.compare_digest(fila[1], codigo_hash):
+                con.execute("UPDATE tinotify_real.recuperaciones SET usado_en = %s WHERE id = %s", (ahora, fila[0]))
+                return True
+            con.execute("UPDATE tinotify_real.recuperaciones SET intentos = intentos + 1 WHERE id = %s", (fila[0],))
+            return False
 
     def cambiar_pass(self, usuario_id, pass_hash):
         with self._tx() as con:

@@ -102,5 +102,16 @@ def hash_invitacion(codigo: str) -> str:
     return sha256_hex(normalizar_invitacion(codigo))
 
 
+def nuevo_codigo_recuperacion() -> str:
+    """Código legible XXXX-XXXX (8 caracteres sin ambiguos, ~40 bits). Vale 15 minutos, un solo uso y 5 intentos."""
+    letras = "".join(secrets.choice(_ALFABETO_INVITACION) for _ in range(8))
+    return f"{letras[:4]}-{letras[4:]}"
+
+
+def hash_recuperacion(usuario_id: str, codigo: str) -> str:
+    """Hash ligado al usuario: el mismo código no sirve para otra cuenta."""
+    return sha256_hex(f"recuperacion|{usuario_id}|{normalizar_invitacion(codigo)}")
+
+
 def hashes_iguales(a: str, b: str) -> bool:
     return hmac.compare_digest(a, b)
