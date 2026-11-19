@@ -134,15 +134,22 @@ def registrar_cuentas(app: FastAPI, *, servicio, protegidas_app, reloj):
 
     @app.post("/auth/recuperar")
     async def recuperar(datos: Recuperar):
-        """Responde SIEMPRE lo mismo, exista o no la cuenta: no revela qué correos están registrados."""
+        """Dice qué pasó: `enviado`, `no_registrado`, `limite` o `fallo_envio`. (Es una beta cerrada: se prioriza que quien escribe sepa
+        qué ocurrió; el tope global de solicitudes limita el uso malintencionado.)"""
         limitar()
         if not limitador_correos.permitir():
             raise HTTPException(429, "Demasiadas solicitudes; espera unos minutos", headers={"Retry-After": "300"})
         try:
-            await run_in_threadpool(servicio.solicitar_recuperacion, datos.correo)
+            estado = await run_in_threadpool(servicio.solicitar_recuperacion, datos.correo)
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise sin_almacen() from None
-        return {"solicitado": True}
+        return {"estado": estado}
+
+    @app.post("/auth/correo/prueba", dependencies=protegidas_app)
+    async def probar_correo():
+        """Solo el propietario: envía un correo de prueba al remitente de Brevo y dice el motivo si falla (código de Brevo, sin datos)."""
+        enviado, motivo = await run_in_threadpool(servicio.probar_correo)
+        return {"enviado": enviado, "motivo": motivo}
 
     @app.post("/auth/restablecer")
     async def restablecer(datos: Restablecer):

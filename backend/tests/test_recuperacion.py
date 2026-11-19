@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from backend.tests.test_monitor_real import Mundo, casos_base
+from backend.tests.test_real_remoto import CAB
 from backend.tests.test_rutas_cuentas import CLAVE, CORREO, bearer, registrar
 from backend.tests.test_servicio_cuentas import AlmacenMemoria as CuentasMemoria, LLAVE, Reloj
 from tinotify.real_remoto import cuentas as c
@@ -14,12 +15,15 @@ NUEVA = "otra-clave-ficticia-2"
 
 
 class CorreoFalso:
-    def __init__(self):
-        self.enviados = []
+    def __init__(self, motivo=None):
+        self.enviados, self.motivo = [], motivo
 
     def enviar(self, destino, asunto, texto, html):
         self.enviados.append({"destino": destino, "asunto": asunto, "texto": texto, "html": html})
-        return True
+        return self.motivo  # None = enviado
+
+    def enviar_prueba(self):
+        return self.enviar("remitente@ejemplo.com", "prueba", "t", "h")
 
     def codigo(self, i=-1):
         import re
@@ -41,11 +45,11 @@ def restablecer(m, codigo, clave=NUEVA, correo=CORREO):
     return m.c.post("/auth/restablecer", json={"correo": correo, "codigo": codigo, "clave": clave})
 
 
-def test_se_envia_un_codigo_solo_a_cuentas_existentes_y_la_respuesta_es_la_misma(mundo):
+def test_se_envia_un_codigo_solo_a_cuentas_existentes_y_se_le_dice_a_quien_pide_que_paso(mundo):
     m, correo = mundo
     registrar(m)
     existe, no_existe = recuperar(m), recuperar(m, "nadie@ejemplo.com")
-    assert existe.status_code == no_existe.status_code == 200 and existe.json() == no_existe.json() == {"solicitado": True}
+    assert existe.json() == {"estado": "enviado"} and no_existe.json() == {"estado": "no_registrado"}
     assert [e["destino"] for e in correo.enviados] == [CORREO]
     assert len(correo.codigo()) == 9 and "15 minutos" in correo.enviados[0]["texto"]
 
@@ -82,8 +86,8 @@ def test_el_codigo_de_una_cuenta_no_sirve_para_otra(mundo):
 def test_solo_tres_solicitudes_por_hora_y_cada_codigo_nuevo_anula_el_anterior(mundo):
     m, correo = mundo
     registrar(m)
-    for _ in range(5):
-        recuperar(m)
+    estados = [recuperar(m).json()["estado"] for _ in range(5)]
+    assert estados == ["enviado"] * 3 + ["limite"] * 2
     assert len(correo.enviados) == 3
     assert restablecer(m, correo.codigo(0)).status_code == 400                       # los anteriores quedaron anulados
     assert restablecer(m, correo.codigo(-1)).status_code == 200
@@ -101,7 +105,7 @@ def test_sin_correo_configurado_la_recuperacion_no_esta_disponible_y_no_falla():
     m = Mundo(casos_base(), cuentas=CuentasMemoria())
     registrar(m)
     assert m.c.get("/auth/recuperacion").json() == {"disponible": False}
-    assert recuperar(m).status_code == 200
+    assert recuperar(m).json() == {"estado": "fallo_envio"}
 
 
 def test_la_disponibilidad_se_anuncia_con_el_correo_configurado(mundo):
@@ -113,11 +117,11 @@ def test_el_codigo_vence_a_los_quince_minutos():
     reloj, correo = Reloj(), CorreoFalso()
     s = ServicioCuentas(CuentasMemoria(), LLAVE, reloj=reloj, n_scrypt=2**10, correo=correo)
     s.registrar(CORREO, CLAVE, s.crear_invitacion(), "consentimiento-v1")
-    assert s.solicitar_recuperacion(CORREO) is True
+    assert s.solicitar_recuperacion(CORREO) == "enviado"
     reloj.avanzar(minutes=16)
     with pytest.raises(CodigoNoValido):
         s.restablecer_clave(CORREO, correo.codigo(), NUEVA)
-    assert s.solicitar_recuperacion(CORREO) is True
+    assert s.solicitar_recuperacion(CORREO) == "enviado"
     s.restablecer_clave(CORREO, correo.codigo(), NUEVA)
 
 
@@ -135,20 +139,24 @@ def test_el_cliente_de_brevo_envia_por_https_con_la_clave_y_no_la_expone():
 
     clave = "xkeysib-" + "a" * 40
     cliente = ClienteBrevo(clave, "Remitente@Ejemplo.com", http=httpx.Client(transport=httpx.MockTransport(responder)))
-    assert cliente.enviar("persona@ejemplo.com", "Asunto", "texto", "<p>html</p>") is True
+    assert cliente.enviar("persona@ejemplo.com", "Asunto", "texto", "<p>html</p>") is None
     assert visto["url"] == URL_BREVO and visto["clave"] == clave
     assert b"remitente@ejemplo.com" in visto["cuerpo"] and b"persona@ejemplo.com" in visto["cuerpo"]
     assert clave not in repr(cliente)
 
 
-def test_el_cliente_de_brevo_devuelve_false_ante_errores_sin_lanzar():
+def test_el_cliente_de_brevo_devuelve_el_motivo_ante_errores_sin_lanzar():
     def caido(peticion):
         raise httpx.ConnectError("sin red")
 
     clave = "xkeysib-" + "a" * 40
-    rechazado = ClienteBrevo(clave, "r@ejemplo.com", http=httpx.Client(transport=httpx.MockTransport(lambda p: httpx.Response(401))))
+    ip = {"code": "unauthorized", "message": "We have detected you are using an unrecognised IP address"}
+    rechazado = ClienteBrevo(clave, "r@ejemplo.com", http=httpx.Client(transport=httpx.MockTransport(lambda p: httpx.Response(401, json=ip))))
+    sin_cuerpo = ClienteBrevo(clave, "r@ejemplo.com", http=httpx.Client(transport=httpx.MockTransport(lambda p: httpx.Response(500))))
     sin_red = ClienteBrevo(clave, "r@ejemplo.com", http=httpx.Client(transport=httpx.MockTransport(caido)))
-    assert rechazado.enviar("p@ejemplo.com", "a", "t", "h") is False and sin_red.enviar("p@ejemplo.com", "a", "t", "h") is False
+    assert rechazado.enviar("p@ejemplo.com", "a", "t", "h").startswith("http_401:unauthorized: We have detected")
+    assert sin_cuerpo.enviar("p@ejemplo.com", "a", "t", "h") == "http_500:" and sin_red.enviar("p@ejemplo.com", "a", "t", "h") == "sin_conexion"
+    assert "p@ejemplo.com" not in rechazado.enviar("p@ejemplo.com", "a", "t", "h")  # el motivo nunca lleva al destinatario
 
 
 def test_la_configuracion_de_brevo_se_valida():
@@ -174,3 +182,20 @@ def test_las_variables_de_brevo_se_validan_en_la_configuracion(tmp_path):
     ok = Config.desde_entorno({**base, "TINOTIFY_RR_BREVO_CLAVE": clave, "TINOTIFY_RR_BREVO_REMITENTE": "R@Ejemplo.com"})
     assert ok.correo_api == (clave, "r@ejemplo.com") and clave not in repr(ok)
     assert Config.desde_entorno(base).correo_api is None
+
+
+def test_solo_el_propietario_prueba_el_correo_y_ve_el_motivo_si_falla():
+    sano = Mundo(casos_base(), cuentas=CuentasMemoria(), correo=CorreoFalso())
+    roto = Mundo(casos_base(), cuentas=CuentasMemoria(), correo=CorreoFalso(motivo="http_401:unauthorized: IP no autorizada"))
+    sin = Mundo(casos_base(), cuentas=CuentasMemoria())
+    assert sano.c.post("/auth/correo/prueba").status_code == 401
+    assert sano.c.post("/auth/correo/prueba", headers=CAB).json() == {"enviado": True, "motivo": None}
+    assert roto.c.post("/auth/correo/prueba", headers=CAB).json() == {"enviado": False, "motivo": "http_401:unauthorized: IP no autorizada"}
+    assert sin.c.post("/auth/correo/prueba", headers=CAB).json() == {"enviado": False, "motivo": "correo_no_configurado"}
+
+
+def test_si_el_proveedor_rechaza_el_correo_se_le_avisa_a_quien_pidio_el_codigo():
+    correo = CorreoFalso(motivo="http_401:unauthorized")
+    m = Mundo(casos_base(), cuentas=CuentasMemoria(), correo=correo)
+    registrar(m)
+    assert recuperar(m).json() == {"estado": "fallo_envio"}

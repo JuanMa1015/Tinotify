@@ -113,28 +113,39 @@ class ServicioCuentas:
     def recuperacion_disponible(self) -> bool:
         return self._correo is not None
 
-    def solicitar_recuperacion(self, correo: str) -> bool:
-        """Envía un código de un solo uso al correo de la cuenta. Devuelve si se envió, SOLO para el registro interno: la ruta responde
-        lo mismo exista o no la cuenta (no revela qué correos están registrados)."""
+    def solicitar_recuperacion(self, correo: str) -> str:
+        """Envía un código de un solo uso al correo de la cuenta y dice qué pasó: `enviado`, `no_registrado`, `limite` (demasiadas
+        solicitudes seguidas) o `fallo_envio` (el proveedor de correo no lo aceptó). Cuenta cerrada y beta con pocas personas: se prefiere
+        decirle con claridad a quien escribe qué ocurrió."""
         try:
             normalizado = c.normalizar_correo(correo)
         except c.DatosNoValidos:
-            return False
+            return "no_registrado"
         fila = self._a.usuario_por_correo_ref(c.correo_ref(self._llave, normalizado))
-        if fila is None or not fila["activo"] or self._correo is None:
-            return False
+        if fila is None or not fila["activo"]:
+            return "no_registrado"
+        if self._correo is None:
+            return "fallo_envio"
         ahora = self._reloj()
         codigo = c.nuevo_codigo_recuperacion()
         if not self._a.crear_recuperacion(fila["id"], c.hash_recuperacion(fila["id"], codigo), ahora + DURACION_RECUPERACION, ahora,
                                           MAX_RECUPERACIONES_HORA):
-            return False  # demasiadas solicitudes seguidas para esta cuenta
+            return "limite"
         texto = (f"Tu código para restablecer la contraseña de Tinotify es: {codigo}\n\nVale 15 minutos y se usa una sola vez. "
                  "Si no lo pediste, ignora este mensaje: tu contraseña no cambia.")
         html = ("<div style='font-family:Arial,sans-serif;color:#14213D;max-width:480px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
                 "<p>Tu código para restablecer la contraseña es:</p>"
                 f"<p style='font-size:28px;font-weight:700;letter-spacing:3px;margin:12px 0'>{codigo}</p>"
                 "<p>Vale 15 minutos y se usa una sola vez. Si no lo pediste, ignora este mensaje: tu contraseña no cambia.</p></div>")
-        return self._correo.enviar(normalizado, "Tu código para restablecer la contraseña de Tinotify", texto, html)
+        motivo = self._correo.enviar(normalizado, "Tu código para restablecer la contraseña de Tinotify", texto, html)
+        return "enviado" if motivo is None else "fallo_envio"
+
+    def probar_correo(self):
+        """Solo para el propietario: envía un correo de prueba al remitente. Devuelve (enviado, motivo)."""
+        if self._correo is None:
+            return False, "correo_no_configurado"
+        motivo = self._correo.enviar_prueba()
+        return motivo is None, motivo
 
     def restablecer_clave(self, correo: str, codigo: str, nueva: str) -> None:
         """Cambia la contraseña con un código válido, cierra TODAS las sesiones y quita el bloqueo por intentos."""
