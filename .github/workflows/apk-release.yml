@@ -59,7 +59,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Revisar tipos y pruebas
         run: npm run typecheck && npm test
 
