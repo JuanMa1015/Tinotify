@@ -43,14 +43,14 @@ export default function Acceso({ onListo, tokenFijo, onCancelar, titulo }: { onL
             <Ionicons name={ver ? 'eye-off-outline' : 'eye-outline'} size={22} color={colores.textoSuave} /></Pressable>} />
         <View style={s.fila}>
           <Switch value={autorizo} onValueChange={setAutorizo} accessibilityLabel="Autorizo la consulta de SIGAC" trackColor={{ true: colores.marino }} thumbColor={colores.blanco} />
-          <Text style={s.autorizo}>Autorizo a Tinotify a guardar mis datos de acceso cifrados en el servidor y a consultar SIGAC por mí 3 veces al día.</Text>
+          <Text style={s.autorizo}>Autorizo a Tinotify a guardar mis datos de acceso cifrados y a consultar SIGAC por mí 3 veces al día.</Text>
         </View>
         {error !== '' && <Aviso texto={error} />}
         <Boton texto={tokenFijo ? 'Guardar' : 'Conectar'} icono="paw" onPress={() => { void enviar(); }} cargando={cargando} desactivado={!completo} />
         {onCancelar && <View style={{ height: 8 }} />}
         {onCancelar && <Boton texto="Cancelar" secundario onPress={onCancelar} desactivado={cargando} />}
       </Tarjeta>
-      <Text style={s.nota}>La primera lectura puede tardar hasta 2 minutos mientras el servidor revisa tus expedientes. Tu clave se guarda cifrada en el servidor y nunca queda en el teléfono.</Text>
+      <Text style={s.nota}>La primera lectura puede tardar hasta 2 minutos mientras Tinotify revisa tus expedientes. Tu clave de SIGAC se guarda cifrada y nunca queda en el teléfono.</Text>
       <Image source={require('../assets/gato-asomado.png')} accessible={false} resizeMode="contain" style={s.asomado} />
     </ScrollView>
   </KeyboardAvoidingView>;

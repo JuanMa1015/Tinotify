@@ -41,7 +41,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     void (async () => {
       const guardado = await leerNombreSigac();
       if (guardado?.nombre) { if (vivo) setNombreSigac(guardado.nombre); return; }
-      if (guardado && Date.now() - guardado.intento < 86400000) return;
+      if (guardado && Date.now() - guardado.intento < 6 * 3600000) return;
       let encontrado = '';
       try { encontrado = nombreParaSaludo((await obtenerPerfil(token)).nombre); }
       catch { return; }  // el servidor no respondió (arranque en frío, SIGAC ocupado o versión antigua): se reintenta en la próxima apertura
@@ -111,7 +111,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
-      {lento && refrescando && <Tarjeta><Text style={s.cuerpo}>El servidor estaba dormido y está despertando. La primera vez puede tardar hasta un minuto; después responde enseguida.</Text></Tarjeta>}
+      {lento && refrescando && <Tarjeta><Text style={s.cuerpo}>Estamos preparando tu información. La primera carga del día puede tardar hasta un minuto.</Text></Tarjeta>}
       {pestana === 'inicio' && <Inicio estado={estado} nombre={nombre || primerNombre(nombreSigac)} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
       {pestana === 'novedades' && <Novedades novedades={novedades} expedientes={expedientes} token={token} onCambio={setNovedades} onExpedientes={setExpedientes}
@@ -134,7 +134,7 @@ function Inicio({ estado, nombre, onConectar }: { estado?: EstadoMonitor; nombre
     {!estado ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto /></> : <>
       {!estado.credenciales_guardadas && <Tarjeta>
         <Text style={s.fuerte}>Conecta tu cuenta de SIGAC</Text>
-        <Text style={[s.cuerpo, { marginBottom: 10 }]}>Aún no hay credenciales guardadas, así que no se revisa nada. Conéctala para empezar el seguimiento.</Text>
+        <Text style={[s.cuerpo, { marginBottom: 10 }]}>Aún no has conectado tu cuenta de SIGAC, así que no se revisa nada. Conéctala para empezar el seguimiento.</Text>
         <Boton texto="Conectar SIGAC" icono="link-outline" onPress={onConectar} />
       </Tarjeta>}
       <Tarjeta oscura estilo={{ overflow: 'hidden' }}>
@@ -190,7 +190,7 @@ function Casos({ estado, expedientes, token, onCambio, onError, onAbrir }: { est
   return <>
     <Titulo texto="Expedientes" subtitulo={estado ? `${estado.expedientes_en_estado} en seguimiento` : undefined} />
     {expedientes === undefined ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /></> :
-      expedientes === null ? <Tarjeta><Text style={s.cuerpo}>El listado de expedientes aún no está disponible en el servidor. Tinotify sigue vigilando tu cuenta y te avisará de las novedades.</Text></Tarjeta> : <>
+      expedientes === null ? <Tarjeta><Text style={s.cuerpo}>El listado de expedientes aún no está disponible. Tinotify sigue vigilando tu cuenta y te avisará de las novedades.</Text></Tarjeta> : <>
       <TextInput accessibilityLabel="Buscar por radicado o nombre" placeholder="Buscar por radicado o nombre" placeholderTextColor={colores.textoSuave}
         value={busqueda} onChangeText={setBusqueda} autoCorrect={false} style={s.buscar} />
       <View style={s.chips}>
@@ -248,9 +248,9 @@ function Novedades({ novedades, expedientes, token, onCambio, onExpedientes, onE
 
   return <>
     <Titulo texto="Novedades" subtitulo="Solo las actuaciones nuevas, de la más reciente a la más antigua" />
-    {novedades === undefined && fallo ? <Tarjeta><Text style={s.cuerpo}>No se pudieron cargar las novedades (el servidor puede estar despertando). Desliza hacia abajo para reintentar.</Text></Tarjeta> :
+    {novedades === undefined && fallo ? <Tarjeta><Text style={s.cuerpo}>No se pudieron cargar las novedades. Desliza hacia abajo para reintentar.</Text></Tarjeta> :
       novedades === undefined ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /></> :
-      novedades === null ? <Tarjeta><Text style={s.cuerpo}>Las novedades aún no están disponibles en el servidor. Tinotify sigue vigilando tu cuenta y te avisará de lo nuevo.</Text></Tarjeta> : <>
+      novedades === null ? <Tarjeta><Text style={s.cuerpo}>Las novedades aún no están disponibles. Tinotify sigue vigilando tu cuenta y te avisará de lo nuevo.</Text></Tarjeta> : <>
       {sinVer > 0 && <View style={s.barraVistos}>
         <Text style={[s.cuerpo, { flex: 1 }]}>{sinVer === 1 ? '1 novedad sin ver' : `${sinVer} novedades sin ver`}</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Marcar todas las novedades como vistas" onPress={() => { void verTodas(); }} style={s.botonVistos}>

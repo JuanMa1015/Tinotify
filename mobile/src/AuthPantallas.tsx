@@ -5,6 +5,12 @@ import { ErrorApi, cambiarClave, eliminarCuenta, iniciarSesion, recuperacionDisp
 import { URL_POLITICA, URL_TERMINOS, mensajeDeAuth, validarClave, validarCorreo, validarRegistro } from './cuentas';
 import { colores, espacio } from './tema';
 
+const TEXTOS_RECUPERACION: Record<string, string> = {
+  no_registrado: 'Ese correo no está registrado en Tinotify. Revisa que sea el mismo con el que creaste tu cuenta.',
+  limite: 'Ya pediste varios códigos. Revisa tu correo (también el spam) o espera una hora para pedir otro.',
+  fallo_envio: 'No pudimos enviar el correo en este momento. Inténtalo de nuevo en unos minutos; si sigue igual, avisa a quien administra Tinotify.',
+};
+
 const mensaje = (err: unknown) => (err instanceof ErrorApi ? (mensajeDeAuth(err.estado, err.detalle) ?? err.message) : 'No se completó la operación.');
 
 function Marco({ children }: { children: React.ReactNode }) {
@@ -22,7 +28,7 @@ export function Bienvenida({ onLogin, onRegistro, onPropietario }: { onLogin: ()
     <Boton texto="Iniciar sesión" icono="log-in-outline" onPress={onLogin} />
     <View style={{ height: espacio.m }} />
     <Boton texto="Crear cuenta con invitación" secundario icono="mail-open-outline" onPress={onRegistro} />
-    <Text style={s.nota}>Entras con el correo y la contraseña de tu cuenta de Tinotify. Tus credenciales de SIGAC se piden una sola vez, después de entrar.</Text>
+    <Text style={s.nota}>Entras con el correo y la contraseña de tu cuenta de Tinotify. Tu usuario y clave de SIGAC se piden una sola vez, después de entrar.</Text>
     <Text accessibilityRole="button" style={s.enlace} onPress={onPropietario}>Acceso del propietario</Text>
     <Text style={s.nota}>El registro es solo por invitación. Pídele el código a quien administra Tinotify.</Text>
   </Marco>;
@@ -70,13 +76,22 @@ export function RecuperarClave({ onListo, onVolver }: { onListo: () => void; onV
   const [enviado, setEnviado] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState('');
+  const [espera, setEspera] = useState(0);  // segundos antes de poder pedir otro código
+  useEffect(() => {
+    if (espera <= 0) return;
+    const t = setTimeout(() => setEspera(e => e - 1), 1000);
+    return () => clearTimeout(t);
+  }, [espera]);
 
   async function pedir() {
     const falla = validarCorreo(correo);
     if (falla) { setError(falla); return; }
     setCargando(true); setError('');
-    try { await solicitarRecuperacion(correo.trim().toLowerCase()); setEnviado(true); }
-    catch (err) { setError(mensaje(err)); }
+    try {
+      const r = await solicitarRecuperacion(correo.trim().toLowerCase());
+      if (r.estado === 'enviado') { setEnviado(true); setEspera(30); }
+      else setError(TEXTOS_RECUPERACION[r.estado] ?? 'No se pudo enviar el código. Inténtalo de nuevo en unos minutos.');
+    } catch (err) { setError(mensaje(err)); }
     finally { setCargando(false); }
   }
 
@@ -100,7 +115,11 @@ export function RecuperarClave({ onListo, onVolver }: { onListo: () => void; onV
         <Boton texto="Enviar código" icono="mail-outline" onPress={() => { void pedir(); }} cargando={cargando} desactivado={correo.trim() === ''} />
       </Tarjeta>
     </> : <>
-      <Text style={s.nota}>Si el correo está registrado, te enviamos un código (revisa también la carpeta de spam). Escríbelo aquí con tu contraseña nueva. Al cambiarla se cierra la sesión en todos tus dispositivos.</Text>
+      <Tarjeta estilo={{ backgroundColor: colores.limaSuave, borderColor: '#9DC356' }}>
+        <Text style={s.confirmacion}>✓ Te enviamos un código a {correo.trim().toLowerCase()}</Text>
+        <Text style={s.nota}>Revisa también la carpeta de spam. Vale 15 minutos.</Text>
+      </Tarjeta>
+      <Text style={s.nota}>Escríbelo aquí con tu contraseña nueva. Al cambiarla se cierra la sesión en todos tus dispositivos.</Text>
       <Tarjeta>
         <Campo icono="keypad-outline" etiqueta="Código del correo" valor={codigo} onCambio={setCodigo} mayusculas />
         <Campo icono="key-outline" etiqueta="Contraseña nueva" valor={nueva} onCambio={setNueva} secreto />
@@ -108,7 +127,8 @@ export function RecuperarClave({ onListo, onVolver }: { onListo: () => void; onV
         {error !== '' && <Aviso texto={error} />}
         <Boton texto="Cambiar contraseña" onPress={() => { void cambiar(); }} cargando={cargando} desactivado={codigo.trim() === '' || nueva === ''} />
       </Tarjeta>
-      <Text accessibilityRole="button" style={s.enlace} onPress={() => { setEnviado(false); setCodigo(''); setError(''); }}>Pedir otro código</Text>
+      <Boton texto={espera > 0 ? `Pedir otro código (${espera} s)` : 'Pedir otro código'} secundario icono="refresh-outline"
+        onPress={() => { setCodigo(''); void pedir(); }} cargando={cargando} desactivado={espera > 0} />
     </>}
     <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
   </Marco>;
@@ -138,7 +158,7 @@ export function Registro({ onListo, onVolver }: { onListo: (token: string, corre
 
   return <Marco>
     <Text accessibilityRole="header" style={s.titulo}>Crear cuenta</Text>
-    <Text style={s.nota}>Antes de empezar: guardamos tu usuario y clave de SIGAC cifrados en el servidor y entramos a SIGAC por ti tres veces al día. No guardamos el historial de tus actuaciones; sí la lista de tus expedientes (radicado, nombre y estado) y, por 90 días, una ficha corta de cada actuación nueva, todo cifrado. Puedes borrar todo cuando quieras.</Text>
+    <Text style={s.nota}>Antes de empezar: guardamos tu usuario y clave de SIGAC cifrados y entramos a SIGAC por ti tres veces al día. No guardamos el historial de tus actuaciones; sí la lista de tus expedientes (radicado, nombre y estado) y, por 90 días, una ficha corta de cada actuación nueva, todo cifrado. Puedes borrar todo cuando quieras.</Text>
     <Tarjeta>
       <Campo icono="ticket-outline" etiqueta="Código de invitación" valor={invitacion} onCambio={setInvitacion} mayusculas />
       <Campo icono="mail-outline" etiqueta="Correo" valor={correo} onCambio={setCorreo} teclado="email-address" />
@@ -205,7 +225,7 @@ export function EliminarCuenta({ token, onEliminada, onCancelar }: { token: stri
 
   return <Marco>
     <Text accessibilityRole="header" style={s.titulo}>Eliminar mi cuenta</Text>
-    <Text style={s.nota}>Se borran del servidor tu cuenta, tus credenciales de SIGAC, la lista de tus expedientes, tu historial y tus avisos. No se puede deshacer.</Text>
+    <Text style={s.nota}>Se borran tu cuenta, tu usuario y clave de SIGAC, la lista de tus expedientes, tu historial y tus avisos. No se puede deshacer.</Text>
     <Tarjeta>
       <Campo icono="lock-closed-outline" etiqueta="Tu contraseña" valor={clave} onCambio={setClave} secreto />
       {error !== '' && <Aviso texto={error} />}
@@ -217,6 +237,7 @@ export function EliminarCuenta({ token, onEliminada, onCancelar }: { token: stri
 }
 
 const s = StyleSheet.create({
+  confirmacion: { fontSize: 16, fontWeight: '700', color: colores.marino, marginBottom: 4 },
   pagina: { padding: 20, paddingTop: 56, paddingBottom: 32 },
   marca: { alignItems: 'center', marginBottom: espacio.xl },
   lema: { fontSize: 16, color: colores.textoSuave, textAlign: 'center', marginTop: 6 },
