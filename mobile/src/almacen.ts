@@ -49,3 +49,8 @@ export const guardarNombre = (nombre: string) => (nombre === '' ? SecureStore.de
 const CLAVE_HUELLA_OFRECIDA = 'tinotify.huella-ofrecida.v1';
 export const huellaOfrecida = async () => (await SecureStore.getItemAsync(CLAVE_HUELLA_OFRECIDA)) === '1';
 export const marcarHuellaOfrecida = () => SecureStore.setItemAsync(CLAVE_HUELLA_OFRECIDA, '1');
+
+// El último correo con el que se entró se recuerda en este teléfono aunque cierres sesión, solo para no tener que escribirlo otra vez.
+const CLAVE_ULTIMO_CORREO = 'tinotify.ultimo-correo.v1';
+export const leerUltimoCorreo = () => SecureStore.getItemAsync(CLAVE_ULTIMO_CORREO);
+export const guardarUltimoCorreo = (correo: string) => SecureStore.setItemAsync(CLAVE_ULTIMO_CORREO, correo);
