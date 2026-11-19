@@ -15,4 +15,4 @@ class CorreoFalso:
         return self.enviar("remitente@ejemplo.com", "prueba", "t", "h")
 
     def codigo(self, i=-1):
-        return re.search(r"[A-Z2-9]{4}-[A-Z2-9]{4}", self.enviados[i]["texto"]).group()
+        return re.search(r"\b\d{6}\b", self.enviados[i]["texto"]).group()
