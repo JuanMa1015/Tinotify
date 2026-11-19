@@ -130,6 +130,8 @@ export default function Ajustes(p: Props) {
           <Text style={[s.cuerpo, { marginBottom: espacio.m }]}>Genera un código de un solo uso, válido por 7 días, que compartes tú.</Text>
           <Boton texto="Crear y compartir invitación" icono="person-add-outline" onPress={() => { void invitar(); }} />
         </Tarjeta>
+        <Boton texto="Enviar correo de prueba" secundario icono="mail-outline" onPress={() => { void probarElCorreo(); }} />
+        <Texto>Comprueba que los códigos por correo salen por Brevo y, si falla, muestra el motivo.</Texto>
       </>}
     </>;
   }
@@ -163,10 +165,6 @@ export default function Ajustes(p: Props) {
         <Text style={s.fuerte}>Correo</Text>
         <Text style={s.cuerpo}>Si tu cuenta tiene un correo registrado, los avisos también llegan allí en el ciclo de las 7:30, 12:30 y 18:30.</Text>
       </Tarjeta>
-      {!p.usuario && <>
-        <Boton texto="Enviar correo de prueba (recuperación)" secundario icono="mail-outline" onPress={() => { void probarElCorreo(); }} />
-        <Texto>Solo para ti como propietario: comprueba que el correo de recuperación de contraseña sale por Brevo y, si falla, muestra el motivo.</Texto>
-      </>}
       <Text style={s.pequeno}>Un teléfono recibe las notificaciones de una sola cuenta a la vez: la última que las active.</Text>
     </>;
   }
