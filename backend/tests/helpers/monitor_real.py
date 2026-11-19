@@ -235,7 +235,7 @@ class AlmacenMemoria:
         ultima = self.ejecuciones[-1] if self.ejecuciones else None
         return {"credenciales_guardadas": self.cred is not None, "expedientes_en_estado": len(self.estado_exp),
                 "avisos_pendientes": len(self.avisos_pendientes()),
-                "ultima_ejecucion": None if ultima is None else {"resultado": ultima["resultado"], "inicio": "t", "fin": "t"}}
+                "ultima_ejecucion": None if ultima is None else {"resultado": ultima["resultado"], "inicio": "t", "fin": "t", "codigo": ultima["codigo"]}}
 
 
 _ORDEN = itertools.count()
