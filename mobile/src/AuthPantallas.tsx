@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Aviso, Boton, Campo, Tarjeta } from './componentes';
-import { ErrorApi, eliminarCuenta, entrar, pedirCodigoAcceso, pedirCodigoRegistro, registrar } from './api';
+import { ErrorApi, adminUsuarios, eliminarCuenta, entrar, pedirCodigoAcceso, pedirCodigoRegistro, registrar } from './api';
 import { TEXTOS_CODIGO, URL_POLITICA, URL_TERMINOS, mensajeDeAuth, validarCorreo, validarInvitacion } from './cuentas';
 import { colores, espacio } from './tema';
 
@@ -152,6 +152,30 @@ export function Registro({ onListo, onVolver }: { onListo: (token: string, corre
       textoBoton="Crear mi cuenta" onConfirmar={() => { void confirmar(); }} onOtro={() => { void pedir(); }} />}
     <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
     <Text style={s.nota}>Tinotify no está afiliado a SIGAC. Los avisos son una ayuda: confirma siempre en el sistema oficial.</Text>
+  </Marco>;
+}
+
+/** Acceso del propietario: solo el código de acceso del servidor (no es una cuenta ni lleva datos de SIGAC). */
+export function AccesoPropietario({ onListo, onVolver }: { onListo: (token: string) => Promise<void>; onVolver: () => void }) {
+  const [codigo, setCodigo] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState('');
+
+  async function enviar() {
+    setCargando(true); setError('');
+    try { await adminUsuarios(codigo.trim()); await onListo(codigo.trim()); }   // la lista de cuentas solo se abre con el código correcto
+    catch (err) { setError(err instanceof ErrorApi && err.estado === 401 ? 'Ese código no es correcto.' : mensaje(err)); setCargando(false); }
+  }
+
+  return <Marco>
+    <Text accessibilityRole="header" style={s.titulo}>Acceso del propietario</Text>
+    <Text style={s.nota}>Escribe el código de acceso del propietario. Entras al panel de administración; no se piden datos de SIGAC.</Text>
+    <Tarjeta>
+      <Campo icono="key-outline" etiqueta="Código de acceso del propietario" valor={codigo} onCambio={setCodigo} secreto />
+      {error !== '' && <Aviso texto={error} />}
+      <Boton texto="Entrar" icono="log-in-outline" onPress={() => { void enviar(); }} cargando={cargando} desactivado={codigo.trim() === ''} />
+    </Tarjeta>
+    <Text accessibilityRole="button" style={s.enlace} onPress={onVolver}>Volver</Text>
   </Marco>;
 }
 

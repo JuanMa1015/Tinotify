@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import Acceso from './src/Acceso';
-import { Bienvenida, Login, Registro } from './src/AuthPantallas';
+import { AccesoPropietario, Bienvenida, Login, Registro } from './src/AuthPantallas';
 import Principal from './src/Principal';
 import { Boton, PantallaCarga } from './src/componentes';
 import { cerrarSesionEnServidor, obtenerEstado, obtenerYo } from './src/api';
@@ -93,7 +93,7 @@ export default function App() {
     {fase === 'bienvenida' && <Bienvenida onLogin={() => setFase('login')} onRegistro={() => setFase('registro')} onPropietario={() => setFase('propietario')} />}
     {fase === 'login' && <Login onListo={(t, c) => alAutenticar(t, false, c)} onVolver={() => setFase('bienvenida')} />}
     {fase === 'registro' && <Registro onListo={(t, c) => alAutenticar(t, true, c)} onVolver={() => setFase('bienvenida')} />}
-    {fase === 'propietario' && <Acceso onListo={alConectarPropietario} onCancelar={() => setFase('bienvenida')} />}
+    {fase === 'propietario' && <AccesoPropietario onListo={alConectarPropietario} onVolver={() => setFase('bienvenida')} />}
     {fase === 'conectar' && token && <Acceso tokenFijo={token} titulo="Conecta tu cuenta de SIGAC" onListo={async () => setFase('principal')} onCancelar={() => setFase('principal')} />}
     {fase === 'principal' && token && <Principal token={token} correo={correo} biometria={biometria} version={version} onBiometria={cambiarBiometria} onSalir={salir} destino={destino} onDestinoAtendido={() => setDestino(null)} />}
   </View>;
