@@ -1,24 +1,8 @@
 """Reutilización de conexiones contra PostgreSQL REAL desechable (variables de supabase/checks/validar_cuentas_real_python.sh)."""
 
-import os
-
 import pytest
 
-
-@pytest.fixture
-def mundo():
-    e = os.environ
-    if not e.get("TINOTIFY_TEST_PG_HOST"):
-        pytest.skip("PostgreSQL desechable no configurado")
-    import psycopg
-    from tinotify.real_remoto.almacen import AlmacenPg
-    from tinotify.real_remoto.config import ConfigPg
-    cfg = ConfigPg(e["TINOTIFY_TEST_PG_HOST"], int(e.get("TINOTIFY_TEST_PG_PORT", "5432")), "postgres", e["TINOTIFY_TEST_PG_USER"],
-                   e["TINOTIFY_TEST_PG_PASSWORD"], None, tls=False)
-    admin = psycopg.connect(host=cfg.host, port=cfg.puerto, dbname="postgres", user=e["TINOTIFY_TEST_PG_ADMIN_USER"],
-                            password=e["TINOTIFY_TEST_PG_ADMIN_PASSWORD"], autocommit=True)
-    yield AlmacenPg(cfg), admin
-    admin.close()
+from backend.tests.test_almacen_canales_pg import mundo  # noqa: F401 - misma base desechable y mismo administrador de pruebas
 
 
 def pid(almacen):
