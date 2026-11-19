@@ -593,17 +593,14 @@ def test_la_definicion_sustituye_el_arranque_del_servicio_existente_sin_ejecutar
     from pathlib import Path
     raiz = Path(__file__).resolve().parents[2]
     propuesta, activo = raiz / "render.real-remoto.propuesta.yaml", raiz / "render.yaml"
-    # En el árbol de trabajo la definición real está en la propuesta y render.yaml sigue siendo el de main (sintético);
-    # en la rama deploy/real-remoto render.yaml ES la definición real y no existe la propuesta.
-    definicion = (propuesta if propuesta.exists() else activo).read_text(encoding="utf-8")
-    if propuesta.exists():
-        assert "real_remoto" not in activo.read_text(encoding="utf-8")  # el render.yaml de esta rama no se tocó
+    definicion = (propuesta if propuesta.exists() else activo).read_text(encoding="utf-8")  # hoy render.yaml es la definición real
     lineas = [l.split("  #")[0] for l in definicion.splitlines() if not l.lstrip().startswith("#")]
     efectivo = chr(10).join(lineas)
     assert "name: tinotify-api" in efectivo and "tinotify-real" not in efectivo  # sustituye el servicio, no crea otro
-    assert "branch: deploy/real-remoto" in efectivo and "branch: main" not in efectivo and "sintetico" not in efectivo
+    assert "branch: main" in efectivo and "deploy/real-remoto" not in efectivo and "sintetico" not in efectivo
     assert "tinotify.real_remoto.app:crear_app --factory" in efectivo and "--workers 1" in efectivo and "--no-proxy-headers" in efectivo
-    assert 'autoDeployTrigger: "off"' in efectivo and "healthCheckPath: /health" in efectivo and "rootDir: backend" in efectivo
+    assert "autoDeployTrigger: commit" in efectivo and "- backend/**" in efectivo   # el filtro evita reiniciar el servicio por cambios ajenos al backend
+    assert "healthCheckPath: /health" in efectivo and "rootDir: backend" in efectivo
     assert "TINOTIFY_SR_" not in efectivo and "DATABASE_URL" not in efectivo and "SUPABASE" not in efectivo and "PG" not in efectivo.replace("PYTHON", "")
     assert "/etc/secrets/acreditacion_sigac.json" in efectivo and "/etc/secrets/referencia_portable.json" in efectivo
     token = efectivo.split("TINOTIFY_RR_TOKEN", 1)[1]

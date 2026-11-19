@@ -1,249 +1,139 @@
 # Tinotify
 
-Prototipo independiente orientado a estudiantes del Consultorio Jurídico de la
-Universidad de Antioquia para explorar la consulta de expedientes y la detección
-de novedades de SIGAC. La integración institucional y la aplicación móvil están
-pendientes. Este repositorio no acredita respaldo ni autorización institucional.
+**Avisos de novedades de SIGAC para estudiantes y asesores del Consultorio Jurídico.** Tinotify revisa tu cuenta de SIGAC tres veces al día y te avisa
+—por notificación y por correo— cuando hay una actuación o un expediente nuevo, diciéndote en qué radicado, en qué etapa y en qué sentido
+(`ASESOR → ESTUDIANTE`, `DIRECCIÓN → ESTUDIANTE`…). Todo lo sensible se guarda cifrado.
 
-## Estado actual
+[![Pruebas backend](https://github.com/JuanMa1015/Tinotify/actions/workflows/backend-tests.yml/badge.svg)](https://github.com/JuanMa1015/Tinotify/actions/workflows/backend-tests.yml)
 
-La implementación es una biblioteca Python experimental instalable, organizada
-en `backend/src/tinotify`, con pruebas en `backend/tests`. Incluye una API mínima
-FastAPI importable como `tinotify.api:app`; la aplicación móvil sigue pendiente.
+> **Tinotify es un proyecto independiente.** No está afiliado a SIGAC ni a la Universidad de Antioquia, ni cuenta con respaldo o autorización
+> institucional. Los avisos son una ayuda: confirma siempre en el sistema oficial. **Estado: beta cerrada** (acceso solo por invitación).
 
-| Capacidad | Estado |
-| --- | --- |
-| Extraer casos desde HTML | Implementada y probada con ejemplos ficticios |
-| Extraer actuaciones y metadatos de anexos | Implementada; no descarga documentos |
-| Reconciliar observaciones | Estado JSON v2, multiplicidad, versiones y ambigüedades explícitas |
-| Clasificar prioridad | Alta para `ASESOR-->ESTUDIANTE` y `DIRECCION-->ESTUDIANTE` |
-| Generar notificaciones | Avisos locales genéricos por tipo y prioridad; no hay entrega push |
-| Cliente HTTP | Implementado con restricciones parciales de rutas y TLS verificado por defecto |
-| Seleccionar rol | POST implementado; no acredita autenticación ni autorización |
-| Reconocer página y menú | Comprobaciones preliminares; devuelven `autenticada=False` |
-| Autenticación real con SIGAC | No implementada ni validada |
-| PostgreSQL/Supabase | Adaptador opt-in y migración de permisos preparados; Supabase remoto sin cambios en esta fase |
-| API FastAPI | Solo `GET /health`; sin PostgreSQL, autenticación ni integración SIGAC |
-| App Expo | Prevista, no implementada |
-| Múltiples estudiantes | No soportados de forma segura actualmente |
+## Qué hace
 
-La suite conserva las **303 pruebas anteriores**: **323 pruebas sin PostgreSQL**
-y **19 de integración opt-in**, con datos sintéticos y TLS. La suite ordinaria
-omite esas 19 pruebas cuando no se habilita explícitamente el entorno aislado.
-Incluye 43 comprobaciones estáticas y de contrato de 4B.1; no ejecutan PostgreSQL.
-Una expectativa original cambió para exigir avisos sin datos del expediente.
-Su aprobación no demuestra preparación
-para producción ni compatibilidad con SIGAC real. Los riesgos de aislamiento,
-concurrencia, identificación y persistencia siguen abiertos en
-[seguridad](docs/security.md).
+- **Seguimiento automático.** Revisa tu cuenta a las 7:30, 12:30 y 18:30 (hora de Bogotá) y compara cada expediente con la revisión anterior.
+- **Avisos con contexto.** Notificación push y correo con el radicado, la etapa y el sentido de cada actuación nueva.
+- **Novedades.** Una pestaña con solo lo nuevo, agrupado por día, con el detalle de cada actuación.
+- **Casos.** Tus expedientes con estado, búsqueda y filtros; actuaciones en vivo y descarga de anexos.
+- **Acceso sin contraseñas.** Registro por invitación y entrada con un código de 6 dígitos que llega a tu correo (que además lo verifica). Huella o rostro para abrir la app.
+- **Administración.** Panel para invitar personas, suspender cuentas, dar administración, vaciar datos y eliminar cuentas, sin ver nunca claves ni contenido.
 
-La [preparación 4B.1](docs/etapa-4b-1.md) contiene una migración propuesta de ocho
-tablas con acceso cerrado y scripts de integridad/concurrencia para revisión.
-Se validó en PostgreSQL 17 aislado; no se ha aplicado a Supabase remoto.
-La API no utiliza estas tablas. La [persistencia 4B.2-B](docs/persistencia-postgresql.md)
-reutiliza su modelo y el motor v2.2, con permisos de funciones preparados pero no
-aplicados al remoto. Solo admite comprobantes sintéticos; no autentica SIGAC.
-El parser aprobado en
-`526f01b` permanece en su rama independiente y no se fusiona en esta entrega.
+## Cómo funciona
 
-La [reconciliación de actuaciones](docs/reconciliacion.md) distingue primera
-observación, modificación confirmada y cambio ambiguo. Sin IDs estables no puede
-identificar perfectamente una actuación. El parser no inventa IDs de SIGAC.
-Los estados v1 requieren conversión explícita a otro archivo y una nueva línea
-base, que puede omitir novedades durante la transición. Los hashes no anonimizan.
-La revisión actual del estado es v2.2. Un ID sintácticamente válido es solo un
-candidato: producción no tiene contratos estables de SIGAC habilitados. Los
-estados anteriores o los cambios de confianza exigen transición explícita sin
-elevar IDs antiguos. Véase [contratos de identidad](docs/contratos-identidad.md).
-
-## Requisitos y dependencias
-
-- Python 3.11; entorno verificado con CPython 3.11.9 en Windows.
-- Ejecución: Beautiful Soup, HTTPX, FastAPI, Uvicorn y Psycopg 3 con su pool.
-- Desarrollo: pytest.
-- Para el comando de instalación por grupos: pip con soporte para `--group`
-  (verificado localmente con pip 26.3).
-
-[backend/pyproject.toml](backend/pyproject.toml) declara las dependencias directas
-y el grupo `local`, con versiones exactas de sus dependencias de ejecución y
-pruebas observadas en el entorno auditado. No incluye Expo ni el paquete
-intermediario redundante `bs4`. El entorno existente puede conservar este último;
-no es necesario desinstalarlo para ejecutar las pruebas.
-
-`backend/requirements.txt` fija la resolución de ejecución y
-`backend/requirements-dev.txt` añade pytest y sus dependencias. Se comprueba su
-correspondencia con el manifiesto. Los tres archivos `requirements*.txt` contienen
-SHA-256 verificados para wheels de CPython 3.11 en Linux x86_64 y Windows x64.
-`requirements-build.txt` fija `setuptools==84.2.1`, `wheel==0.48.0` y su dependencia
-`packaging`; no son dependencias de la aplicación. Los hashes verifican artefactos,
-pero no sustituyen una auditoría de vulnerabilidades ni certifican su autoría.
-La distribución se llama `tinotify-backend` y el paquete importable es `tinotify`.
-
-## Desarrollo local
-
-Desde la raíz del repositorio, preparar el entorno e instalar el paquete editable
-antes de ejecutar pytest. Si ya existe `.venv`, omitir su creación:
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip --version
-# La instalacion necesita acceso al indice.
-.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
-.\.venv\Scripts\python.exe backend/scripts/install_local.py
-.\.venv\Scripts\python.exe -m pip check
-.\.venv\Scripts\python.exe -m pytest -v
+```mermaid
+flowchart LR
+    CRON["GitHub Actions<br/>7:30 · 12:30 · 18:30"] -->|"dispara la revisión"| API["API en Render<br/>FastAPI"]
+    CRON -->|"correo de avisos"| SMTP["Gmail SMTP"]
+    APP["App Android<br/>Expo · React Native"] <-->|"HTTPS"| API
+    API <-->|"sesión temporal"| SIGAC["SIGAC"]
+    API <-->|"estado cifrado"| DB[("Supabase<br/>PostgreSQL")]
+    API -->|"push"| FCM["Firebase FCM"]
+    API -->|"códigos de acceso"| BREVO["Brevo"]
 ```
 
-La instalación externa verifica hashes y rechaza distribuciones fuente. El script
-local construye solo Tinotify sin índice ni resolución de dependencias, usando las
-herramientas ya verificadas; instala la wheel no editable mediante un manifiesto
-temporal con SHA-256 y sin red. Sus archivos temporales se eliminan al terminar.
-Repetir el script después de editar código para actualizar el paquete instalado.
-El grupo `local` conserva un inventario de versiones; no usarlo como sustituto
-de la instalación con hashes en CI o Render.
+1. Una persona se registra con una invitación y conecta su usuario y clave de SIGAC. Se guardan **cifrados** (AES-256-GCM); la llave solo existe en la configuración del servicio.
+2. Cada revisión inicia sesión en SIGAC por ella, lee sus expedientes y calcula una **huella con clave** de cada actuación. La **novedad** es lo que aparece respecto a la revisión anterior.
+3. La primera revisión es una línea base silenciosa: lo que ya existía no se anuncia.
+4. Si hay novedades, se crea un aviso: push inmediato y correo en el siguiente ciclo. El texto de la actuación no viaja en el aviso.
 
-Las pruebas usan datos ficticios, transportes HTTP simulados y directorios
-temporales para comprobar persistencia. No necesitan credenciales ni acceso a
-SIGAC. `pytest.ini` permite ejecutarlas desde la raíz con importaciones del
-paquete instalado, sin configurar `PYTHONPATH` ni modificar `sys.path`.
+## Privacidad y seguridad
 
-Para iniciar únicamente la API local, desde la raíz:
+- Las credenciales de SIGAC, el listado de expedientes, las fichas de actuaciones nuevas y el correo se guardan **cifrados**; las huellas usan HMAC con clave. Las fichas se conservan 90 días.
+- Sin contraseñas propias: el correo se verifica con un código de un solo uso (15 minutos, 5 intentos, 3 por hora).
+- Cada persona ve solo lo suyo. El panel de administración muestra estados y conteos, **nunca** claves de SIGAC ni expedientes.
+- La base de datos tiene RLS forzado y acceso cerrado a los clientes de Supabase; la API entra con un login de privilegios mínimos.
+- La app guarda su sesión en el almacén seguro de Android y nunca guarda tu usuario ni tu clave de SIGAC.
 
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn tinotify.api:app --host 127.0.0.1 --port 8000
-```
+Detalle en [seguridad](docs/security.md), en la [política de tratamiento de datos](docs/legal/politica-tratamiento-datos.md) y en el
+[consentimiento](docs/legal/consentimiento-en-app.md). No se deben incorporar credenciales, cookies, HTML reales ni datos de personas al repositorio,
+las pruebas, los logs ni los reportes de errores.
 
-`GET http://127.0.0.1:8000/health` devuelve `200` y `{"status":"ok"}`. Comprueba
-solo que el proceso responde; no acredita acceso a PostgreSQL, Supabase ni SIGAC.
-No necesita `.env`. Las rutas de expedientes/usuarios, OpenAPI y las páginas de
-documentación HTTP no están habilitadas. El workflow `Pruebas backend` ejecuta
-pytest en PR hacia `main` y en cada push a `main`, con Python 3.11 en Linux y Windows.
-No aplica migraciones, no despliega y no recibe secretos de aplicación.
-
-La validación inicial de la migración utilizó entornos temporales. Al cerrar la
-etapa 2 se instaló también Tinotify en modo editable en el `.venv` principal,
-desde el proyecto local `backend/`, sin instalar ni actualizar otras dependencias.
-Las 54 pruebas pasaron desde la raíz con ese entorno y `pip check` no encontró
-conflictos. En otro entorno existente sigue siendo necesario instalar el paquete
-antes de ejecutar las nuevas pruebas.
-
-## Distribución y validación
-
-Para construir una wheel con el entorno preparado:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip wheel --no-index --no-deps --no-build-isolation --wheel-dir dist .\backend
-```
-
-Este comando requiere las herramientas de `requirements-build.txt` ya instaladas.
-La wheel solo contiene el paquete `tinotify` y sus metadatos; las pruebas y el
-HTML ficticio permanecen en el repositorio y no forman parte de la distribución.
-
-Durante la migración se verificaron exactamente 54 pruebas en cada paso, además
-de la instalación editable y una wheel instalada en otro entorno temporal. Las
-dos instalaciones se comprobaron desde fuera del repositorio con la red bloqueada.
-Los entornos reutilizaron las dependencias existentes mediante una referencia
-local de solo lectura; no fue una resolución independiente de dependencias desde
-cero. La única herramienta nueva autorizada fue `wheel==0.45.1`, instalada en el
-entorno temporal. Los archivos de estado de prueba se eliminaron al finalizar.
-
-## Estructura actual
+## Estructura del repositorio
 
 ```text
 tinotify/
-├── backend/
-│   ├── pyproject.toml
+├── backend/                      # API y monitor (Python 3.11, FastAPI)
 │   ├── src/tinotify/
-│   │   ├── domain/                   # Actuaciones, identificadores y avisos
-│   │   ├── parsers/                  # casos_parser.py y parser.py
-│   │   ├── services/                 # sigac_service.py y reconciliacion.py
-│   │   ├── integrations/sigac/       # Cliente, roles, menú y sesión
-│   │   ├── persistence/monitor.py
-│   │   └── api/                      # app ASGI; solo GET /health
-│   └── tests/
-│       ├── test_*.py                 # Suite backend; incluye contrato HTTP
-│       └── fixtures/caso_prueba.html
-├── docs/
-│   ├── architecture.md
-│   ├── contratos-identidad.md
-│   ├── deployment.md
-│   ├── reconciliacion.md
-│   └── security.md
+│   │   ├── real_remoto/          # Servicio en producción: rutas, cuentas, monitor, cifrado, push, correo
+│   │   ├── integrations/sigac/   # Cliente de SIGAC (sesión temporal, lectura validada)
+│   │   ├── parsers/ domain/ services/ persistence/
+│   │   └── demo/ api/            # Demostración y API mínima heredadas (casi sin uso en producción)
+│   ├── scripts/                  # Ciclo de revisiones, verificaciones y herramientas manuales
+│   └── tests/                    # Más de 2000 pruebas con datos ficticios
+├── mobile/                       # App Android (Expo SDK 58 · React Native · TypeScript)
 ├── supabase/
-│   ├── config.toml
-│   ├── checks/                     # Consultas de inspeccion, sin DDL
-│   └── migrations/                 # 4A aplicada y registrada en Supabase
-├── package.json                    # Solo herramientas de desarrollo
-├── package-lock.json
-├── .env.example
-├── .gitignore
-├── pytest.ini
-└── README.md
+│   ├── propuestas/               # Migraciones del esquema tinotify_real (alta y baja)
+│   └── checks/                   # Validación contra PostgreSQL 17 desechable (Docker)
+├── docs/                         # Documentación técnica, operativa y legal
+├── .github/workflows/            # Pruebas, revisiones programadas, ping y compilación del APK
+└── render.yaml                   # Valores de referencia del servicio en Render
 ```
 
-La arquitectura actual y las siguientes etapas se describen en
-[arquitectura](docs/architecture.md). La app móvil aún no tiene carpeta ni código.
+## Desarrollo
 
-## Configuración y privacidad
+### Backend
 
-La etapa 4A incluye Supabase CLI **3.1.0**, fijado en `package.json` y
-`package-lock.json`. La migración `20261112050000` está aplicada una sola vez
-y fue verificada en Supabase el 12 de noviembre de 2026.
-No se requiere PostgreSQL local ni Docker. El proyecto remoto existente se
-destina exclusivamente a desarrollo con datos ficticios, aunque la CLI lo
-etiquete como `production`: esa etiqueta de la plataforma no autoriza datos
-reales ni lo convierte en el entorno de producción de Tinotify. La CLI está
-vinculada; se verificaron propietarios, roles, privilegios, ausencia de tablas,
-historial y dry-run sin migraciones pendientes. Los esquemas privados están
-excluidos de Exposed schemas, comprobado en Dashboard.
-No existe todavía un adaptador PostgreSQL.
+Requiere Python 3.11. Desde la raíz:
 
 ```powershell
-# Restaurar herramientas en otro equipo (descarga paquetes; requiere autorizacion).
-npm.cmd ci --no-audit --no-fund
-$env:SUPABASE_TELEMETRY_DISABLED='1'
-$env:DO_NOT_TRACK='1'
-npm.cmd exec --offline -- supabase --version
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.txt -r backend/requirements-build.txt
+.\.venv\Scripts\python.exe backend/scripts/install_local.py
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-El [procedimiento de despliegue](docs/deployment.md) separa la vinculación, la
-revisión y la aplicación remota, que requieren aprobación. La API mínima está
-preparada para Render Free mediante `render.yaml`; la app nativa se distribuirá
-con Expo/EAS Build. Vercel queda reservado
-para una posible versión web. Ningún servicio se ha desplegado.
+Las dependencias se instalan con hashes verificados. Las pruebas usan datos ficticios y transportes simulados: no necesitan credenciales ni acceso a SIGAC.
+Las pruebas contra PostgreSQL real corren en Docker y no tocan Supabase: `bash supabase/checks/validar_cuentas_real_python.sh`.
 
-`.env.example` contiene únicamente valores de demostración para una futura capa
-de configuración. **El código actual no carga `.env` ni consume esas variables**;
-por tanto, no activan un modo sintético ni deshabilitan las llamadas del cliente.
-Actualmente solo la suite de pruebas emplea transportes simulados.
+### App móvil
 
-No incorporar credenciales, cookies, sesiones, HTML reales, documentos ni datos
-personales al repositorio, las pruebas, los logs o los reportes de errores. Las
-carpetas privadas y archivos locales habituales están excluidos en `.gitignore`.
-La exclusión no elimina archivos ya versionados ni detecta datos incrustados en
-código. Revisar también metadatos de anexos, identificadores de casos y autoría
-de commits antes de publicar. No usar variables `EXPO_PUBLIC_*` para secretos.
+Requiere Node.js 22. Desde `mobile/`:
 
-La integración real queda condicionada a revisar permisos institucionales. No
-implementar almacenamiento de credenciales de SIGAC ni usar expedientes reales
-como fixtures. Reconocer un menú no sustituye la autorización del servidor.
+```powershell
+npm ci
+npm run typecheck
+npm test
+npx expo export --platform android --output-dir exportaciones/bundle   # comprueba que el bundle compila
+```
 
-## Hoja de ruta
+Las notificaciones push y el acceso nativo necesitan una *development build* (no funcionan en Expo Go).
 
-1. Preparar documentación y dependencias: completado.
-2. Empaquetar y migrar módulos manteniendo las pruebas aprobadas: implementado.
-3. Identidad, versión de contenido y reconciliación conservadora: implementado.
-4. Implementar persistencia transaccional y aislamiento por estudiante.
-5. Crear una API FastAPI sobre datos sintéticos.
-6. Revisar permisos y diseñar la integración institucional y las sesiones.
-7. Implementar React Native, Expo y TypeScript, con entrega de avisos persistente.
+## Despliegue y lanzamientos
+
+| Qué | Dónde | Guía |
+| --- | --- | --- |
+| API | Render, desde `main` | [Despliegue y operación](docs/despliegue-real-remoto-render.md) |
+| Base de datos | Supabase, migraciones a mano | [Despliegue y operación § 3](docs/despliegue-real-remoto-render.md#3-base-de-datos-supabase) |
+| App Android | APK compilado por GitHub Actions y publicado en *Releases* | [Cómo lanzar una versión](docs/lanzamiento.md) |
+
+Cada cambio entra por *pull request*: pruebas del backend en Linux y Windows y análisis de Sonar deben estar en verde.
+
+## Documentación
+
+| Tema | Documento |
+| --- | --- |
+| Despliegue, operación y solución de problemas | [despliegue-real-remoto-render.md](docs/despliegue-real-remoto-render.md) |
+| Lanzar una versión de la app | [lanzamiento.md](docs/lanzamiento.md) |
+| Cuentas, invitaciones y sesiones | [multiusuario.md](docs/multiusuario.md) |
+| Notificaciones push | [notificaciones-push.md](docs/notificaciones-push.md) |
+| Almacén del monitor en Supabase | [monitor-real-supabase.md](docs/monitor-real-supabase.md) |
+| Seguridad | [security.md](docs/security.md) |
+| Arquitectura | [architecture.md](docs/architecture.md) |
+| Reconciliación y contratos de identidad | [reconciliacion.md](docs/reconciliacion.md) · [contratos-identidad.md](docs/contratos-identidad.md) |
+| Política de datos, términos y consentimiento | [docs/legal](docs/legal) |
+
+El resto de los archivos de `docs/` conserva el historial de diseño y validación de las etapas anteriores del proyecto.
+
+## Estado y próximos pasos
+
+La versión **0.1.0** es una beta cerrada. Pendiente: revisión legal de la política y los términos por una persona abogada, dominio propio para el correo,
+recuperación del acceso si se pierde el correo, alertas externas si el servicio o las revisiones dejan de funcionar y, más adelante, publicación en tiendas.
+Los cambios de la app se registran en [mobile/CHANGELOG.md](mobile/CHANGELOG.md).
 
 ## Contribuciones y licencia
 
-Los cambios de comportamiento deben incluir pruebas con ejemplos sintéticos y
-explicar su impacto sobre privacidad. No adjuntar sesiones o datos reales para
-reproducir fallos. Consultar [seguridad](docs/security.md) antes de reportarlos.
+Los cambios de comportamiento deben incluir pruebas con datos ficticios y explicar su impacto sobre la privacidad. No adjuntes sesiones ni datos reales para
+reproducir fallos; consulta [seguridad](docs/security.md) antes de reportarlos.
 
-La licencia está pendiente de decisión. No se ha añadido un archivo `LICENSE` ni
-se declara todavía una licencia open source. La futura licencia del código no
-otorgará derechos sobre SIGAC, marcas institucionales o expedientes.
+La licencia está pendiente de decisión: por ahora no se otorgan derechos de uso, copia ni distribución sobre el código. Una futura licencia no otorgará
+derechos sobre SIGAC, marcas institucionales ni expedientes.
