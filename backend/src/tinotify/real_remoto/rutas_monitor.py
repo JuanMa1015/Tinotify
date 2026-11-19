@@ -87,6 +87,19 @@ def registrar_monitor(app: FastAPI, *, servicios, servicio_actual, config, prote
         except (AlmacenNoDisponible, AlmacenIncompatible):
             raise almacen_no_disponible() from None
 
+    @app.get("/real/perfil")
+    async def perfil(servicio: Annotated[object, Depends(servicio_actual)]):
+        """Nombre de la persona en SIGAC, para el saludo de la app. No se guarda en el servidor."""
+        with traduciendo():
+            return await run_in_threadpool(servicio.perfil)
+
+    @app.get("/real/novedades")
+    async def novedades(servicio: Annotated[object, Depends(servicio_actual)], limite: Annotated[int, Query(ge=1, le=200)] = 100):
+        try:
+            return {"novedades": await run_in_threadpool(servicio.novedades, limite)}
+        except (AlmacenNoDisponible, AlmacenIncompatible):
+            raise almacen_no_disponible() from None
+
     @app.get("/real/expedientes/{caso}/actuaciones")
     async def actuaciones_expediente(servicio: Annotated[object, Depends(servicio_actual)], caso: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")]):
         with traduciendo():

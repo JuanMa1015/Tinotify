@@ -253,9 +253,31 @@ class AlmacenPg:
                                 "WHERE e.usuario_id IS NOT DISTINCT FROM %s::uuid", (self._u,)).fetchall()
         return [(f[0], f[1], bytes(f[2]), bytes(f[3]), f[4], f[5], f[6].isoformat() if f[6] else None) for f in filas]
 
+    # --- novedades (fichas cifradas) -----------------------------------------------------------------------------------
+    def guardar_novedades(self, filas):
+        """filas: (caso_ref, version_llave, nonce, cifrado). Conserva 90 días."""
+        with self._tx() as con:
+            with con.cursor() as cur:
+                cur.executemany("INSERT INTO tinotify_real.novedades (caso_ref, version_llave, nonce, cifrado) VALUES (%s, %s, %s, %s)", list(filas))
+            con.execute("DELETE FROM tinotify_real.novedades WHERE detectada_en < clock_timestamp() - interval '90 days' "
+                        "AND caso_ref IN (SELECT caso_ref FROM tinotify_real.estado_expediente WHERE usuario_id IS NOT DISTINCT FROM %s::uuid)", (self._u,))
+
+    def novedades(self, limite=100):
+        """(id, caso_ref, version_llave, nonce, cifrado, vista, detectada_en iso), la más reciente primero."""
+        with self._tx() as con:
+            filas = con.execute("SELECT n.id, n.caso_ref, n.version_llave, n.nonce, n.cifrado, n.vista, n.detectada_en "
+                                "FROM tinotify_real.novedades n JOIN tinotify_real.estado_expediente e ON e.caso_ref = n.caso_ref "
+                                "WHERE e.usuario_id IS NOT DISTINCT FROM %s::uuid ORDER BY n.detectada_en DESC, n.id LIMIT %s",
+                                (self._u, max(1, min(int(limite), 500)))).fetchall()
+        return [(str(f[0]), f[1], f[2], bytes(f[3]), bytes(f[4]), f[5], f[6].isoformat()) for f in filas]
+
     def marcar_vistos(self, caso_ref=None):
         with self._tx() as con:
             propios = "caso_ref IN (SELECT caso_ref FROM tinotify_real.estado_expediente WHERE usuario_id IS NOT DISTINCT FROM %s::uuid)"
+            if caso_ref is None:
+                con.execute(f"UPDATE tinotify_real.novedades SET vista = true WHERE NOT vista AND {propios}", (self._u,))
+            else:
+                con.execute(f"UPDATE tinotify_real.novedades SET vista = true WHERE NOT vista AND caso_ref = %s AND {propios}", (caso_ref, self._u))
             if caso_ref is None:
                 return con.execute("UPDATE tinotify_real.expedientes SET novedades_no_vistas = 0, nuevo = false "
                                    f"WHERE (novedades_no_vistas > 0 OR nuevo) AND {propios}", (self._u,)).rowcount

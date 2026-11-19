@@ -14,12 +14,14 @@ Reglas:
 """
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
 import hashlib
 import hmac
 
 from tinotify.integrations.sigac.lectura_validada import _resolver_lectura, leer_historial_validado
 from tinotify.integrations.sigac.sigac_client import SigacClientError, SigacSessionExpired
+from tinotify.integrations.sigac.sigac_perfil import RUTA_BANNER, extraer_nombre
 from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.services.referencia_portable import _sub, huella_portable
 
@@ -50,6 +52,7 @@ class Cambio:
     generacion: int
     anomalia: bool
     en_bd: bool            # False: hay que insertar el expediente completo
+    nuevas: Counter = field(default_factory=Counter)  # huellas nuevas (solo en `novedades`)
 
 
 @dataclass(frozen=True)
@@ -101,14 +104,32 @@ def planificar(previos, lecturas, semillas=None):
             n = nuevas.total()
             novedades += n
             con_novedades += 1
-            cambios.append(Cambio(ref, "novedades", actual, n, previo.acreditado, previo.generacion + 1, False, en_bd))
+            cambios.append(Cambio(ref, "novedades", actual, n, previo.acreditado, previo.generacion + 1, False, en_bd, Counter(nuevas)))
         else:
             cambios.append(Cambio(ref, "sin_cambios", actual, 0, previo.acreditado, previo.generacion, False, en_bd))
     return Plan(tuple(cambios), len(lecturas), novedades, con_novedades, nuevos, anomalias, primera)
 
 
+def ficha_de(a):
+    """Datos mínimos de una actuación para el feed de Novedades (se guardan CIFRADOS): fecha, etapa, sentido y un extracto corto."""
+    return {"fecha": a.fecha.isoformat(), "etapa": a.etapa[:160], "origen": a.origen[:60], "destino": a.destino[:60],
+            "remitente": a.remitente[:160], "resumen": _extracto(a.descripcion), "anexos": len(a.anexos)}
+
+
+def _extracto(descripcion, largo=240):
+    texto = descripcion
+    if texto.startswith("TINOTIFY_FILAS_V1:"):
+        try:
+            filas = json.loads(texto[len("TINOTIFY_FILAS_V1:"):])["filas"]
+            texto = " · ".join(f"{f[0]}: {f[1]}" for f in filas)
+        except (ValueError, KeyError, IndexError, TypeError):
+            pass
+    texto = " ".join(texto.split())
+    return texto if len(texto) <= largo else texto[:largo - 1].rstrip() + "…"
+
+
 def leer_expedientes(cliente, usuario, clave, *, tipo, total_casos, caso_login, clave_acreditacion, instancia,
-                     max_expedientes=MAX_EXPEDIENTES):
+                     max_expedientes=MAX_EXPEDIENTES, fichas=None):
     """Una autenticación y una lectura validada por expediente. Devuelve ({caso_ref: Counter}, fallidos, listados, errores, diagnosticos, metadatos) con `errores` = conteo por (código, etapa) y `diagnosticos` = conteos estructurales de hasta MAX_DIAGNOSTICOS relecturas.
 
     Un expediente que falla (salvo por sesión caducada, que aborta todo) se omite y su estado no cambia. Un historial vacío es un
@@ -123,7 +144,10 @@ def leer_expedientes(cliente, usuario, clave, *, tipo, total_casos, caso_login, 
         metadatos[ref] = (caso.numero, caso.cliente, caso.estado)  # del listado de SIGAC; se guardan CIFRADOS
         try:
             _, actuaciones = _resolver_lectura(leer_historial_validado(cliente, caso.numero))
-            lecturas[ref] = Counter(huella_portable(clave_acreditacion, a.huella_version) for a in actuaciones)
+            huellas = [(huella_portable(clave_acreditacion, a.huella_version), a) for a in actuaciones]
+            lecturas[ref] = Counter(h for h, _ in huellas)
+            if fichas is not None:
+                fichas[ref] = {h: ficha_de(a) for h, a in huellas}  # en memoria: solo se guardan (cifradas) las de las novedades
         except SigacSessionExpired:
             raise
         except SigacClientError as error:
@@ -155,6 +179,16 @@ def leer_un_expediente(cliente, usuario, clave, *, tipo, total_casos, caso_login
             return []
         raise
     return actuaciones
+
+
+def leer_nombre(cliente, usuario, clave, *, tipo, total_casos, caso_login):
+    """Una autenticación y una lectura del banner de SIGAC. Devuelve el nombre de quien inició sesión o None."""
+    opciones = {"listado_estructural": True} if total_casos is None else {}
+    cliente.autenticar(usuario, clave, tipo=tipo, total_casos_esperado=total_casos, caso_login=caso_login, **opciones)
+    try:
+        return extraer_nombre(cliente.obtener_html(RUTA_BANNER))
+    except SigacClientError:
+        return None  # el nombre es opcional: un fallo aquí no es un fallo de acceso
 
 
 def clave_de_usuario(clave_acreditacion, usuario):

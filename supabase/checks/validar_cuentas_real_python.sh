@@ -53,6 +53,12 @@ adm < "$RAIZ/supabase/propuestas/20261118040000_correo_de_aviso_down.sql" || { e
 echo "BAJA_CORREO_OK"
 adm < "$RAIZ/supabase/propuestas/20261118040000_correo_de_aviso.sql" || { echo "SEGUNDA_ALTA_CORREO_FALLO"; exit 1; }
 echo "SEGUNDA_ALTA_CORREO_OK"
+adm < "$RAIZ/supabase/propuestas/20261118050000_novedades.sql" || { echo "ALTA_NOVEDADES_FALLO"; exit 1; }
+echo "ALTA_NOVEDADES_OK"
+adm < "$RAIZ/supabase/propuestas/20261118050000_novedades_down.sql" || { echo "BAJA_NOVEDADES_FALLO"; exit 1; }
+echo "BAJA_NOVEDADES_OK"
+adm < "$RAIZ/supabase/propuestas/20261118050000_novedades.sql" || { echo "SEGUNDA_ALTA_NOVEDADES_FALLO"; exit 1; }
+echo "SEGUNDA_ALTA_NOVEDADES_OK"
 adm -c "CREATE ROLE tinotify_real_login LOGIN INHERIT PASSWORD '$CLAVE_LOGIN'; GRANT tinotify_real_app TO tinotify_real_login;" || exit 1
 # Administrador de pruebas con contrasena (solo en este contenedor desechable): limpia las tablas entre pruebas (el login de la aplicacion no tiene TRUNCATE).
 CLAVE_ADMIN="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9')"

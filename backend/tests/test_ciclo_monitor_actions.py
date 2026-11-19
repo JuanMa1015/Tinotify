@@ -163,3 +163,14 @@ def test_sin_detalle_el_correo_sale_con_conteos_y_nunca_lleva_el_contenido_de_la
     m = ciclo.construir_correo(AVISO, "o@example.com", "d@example.com")
     texto = m.get_body(preferencelist=("plain",)).get_content()
     assert "2 actuación(es) nueva(s) en 1 expediente(s)" in texto and "Abrir Tinotify" not in texto
+
+
+def test_el_correo_detalla_cada_actuacion_nueva_sin_incluir_su_texto():
+    aviso = {"novedades": 1, "expedientes_con_novedades": 1, "expedientes_nuevos": 0, "anomalias": 0,
+             "expedientes": [{"numero": 91256, "cliente": "CLIENTE UNO", "novedades": 1, "nuevo": False}],
+             "novedades_detalle": [{"numero": 91256, "etapa": "Aprobacion de informe", "origen": "ASESOR", "destino": "ESTUDIANTE", "fecha": "2026-11-18T09:00:00"}]}
+    msg = ciclo.construir_correo(aviso, "a@example.test", "b@example.test", "https://x.example/abrir")
+    plano = msg.get_body(("plain",)).get_content()
+    web = msg.get_body(("html",)).get_content()
+    for cuerpo in (plano, web):
+        assert "Aprobacion de informe" in cuerpo and "ASESOR → ESTUDIANTE" in cuerpo and "2026-11-18" in cuerpo
