@@ -40,30 +40,34 @@ export function Aviso({ texto }: { texto: string }) {
   return <View accessibilityLiveRegion="polite" style={e.aviso}><Ionicons name="alert-circle" size={18} color={colores.error} /><Text style={e.avisoTxt}>{texto}</Text></View>;
 }
 
-export function BarraInferior({ activa, onElegir }: { activa: string; onElegir: (id: string) => void }) {
+export function BarraInferior({ activa, onElegir, insignias }: { activa: string; onElegir: (id: string) => void; insignias?: Record<string, number> }) {
   const items: { id: string; texto: string; icono: Icono }[] = [
     { id: 'inicio', texto: 'Inicio', icono: 'home-outline' }, { id: 'casos', texto: 'Casos', icono: 'folder-outline' },
+    { id: 'novedades', texto: 'Novedades', icono: 'notifications-outline' },
     { id: 'actividad', texto: 'Actividad', icono: 'refresh-outline' }, { id: 'ajustes', texto: 'Ajustes', icono: 'settings-outline' },
   ];
   return <View style={e.barra} accessibilityRole="tablist">
     {items.map(i => {
       const on = i.id === activa;
       return <Pressable key={i.id} accessibilityRole="tab" accessibilityState={{ selected: on }} onPress={() => onElegir(i.id)} style={[e.barraItem, on && e.barraItemOn]}>
-        <Ionicons name={i.icono} size={22} color={on ? colores.lima : colores.fondo} />
+        <View>
+          <Ionicons name={i.icono} size={22} color={on ? colores.lima : colores.fondo} />
+          {!!insignias?.[i.id] && <View accessibilityLabel={`${insignias[i.id]} sin ver`} style={e.insignia}><Text style={e.insigniaTxt}>{insignias[i.id] > 99 ? '99+' : insignias[i.id]}</Text></View>}
+        </View>
         <Text style={[e.barraTxt, on && { color: colores.lima }]}>{i.texto}</Text>
       </Pressable>;
     })}
   </View>;
 }
 
-export function Campo({ icono, etiqueta, valor, onCambio, secreto, teclado, mayusculas, verContrasena, visible, derecha }: {
+export function Campo({ icono, etiqueta, valor, onCambio, secreto, teclado, mayusculas, palabras, verContrasena, visible, derecha }: {
   icono: Icono; etiqueta: string; valor: string; onCambio: (v: string) => void; secreto?: boolean;
-  teclado?: 'default' | 'email-address'; mayusculas?: boolean; verContrasena?: () => void; visible?: boolean; derecha?: ReactNode;
+  teclado?: 'default' | 'email-address'; mayusculas?: boolean; palabras?: boolean; verContrasena?: () => void; visible?: boolean; derecha?: ReactNode;
 }) {
   return <View style={e.campo}>
     <Ionicons name={icono} size={20} color={colores.textoSuave} />
     <TextInput accessibilityLabel={etiqueta} placeholder={etiqueta} placeholderTextColor={colores.textoSuave} value={valor} onChangeText={onCambio}
-      secureTextEntry={secreto} keyboardType={teclado ?? 'default'} autoCapitalize={mayusculas ? 'characters' : 'none'} autoCorrect={false}
+      secureTextEntry={secreto} keyboardType={teclado ?? 'default'} autoCapitalize={mayusculas ? 'characters' : palabras ? 'words' : 'none'} autoCorrect={false}
       autoComplete="off" importantForAutofill="no" spellCheck={false} contextMenuHidden={secreto} style={e.entrada} />
     {verContrasena
       ? <Pressable accessibilityRole="button" accessibilityLabel={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'} onPress={verContrasena} hitSlop={12}>
@@ -112,4 +116,6 @@ export const e = StyleSheet.create({
   barra: { flexDirection: 'row', backgroundColor: colores.marino, borderRadius: radios.grande, marginHorizontal: 12, marginBottom: 12, padding: 6 },
   barraItem: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: radios.medio, gap: 2 }, barraItemOn: { backgroundColor: colores.marinoSuave },
   barraTxt: { fontSize: 12, color: colores.fondo },
+  insignia: { position: 'absolute', top: -5, right: -10, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colores.lima, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  insigniaTxt: { fontSize: 11, fontWeight: '800', color: colores.marino },
 });

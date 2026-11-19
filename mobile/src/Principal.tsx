@@ -5,11 +5,12 @@ import Acceso from './Acceso';
 import Ajustes, { type SeccionAjustes } from './Ajustes';
 import { CambiarClave, EliminarCuenta } from './AuthPantallas';
 import { URL_SIGAC, esTokenDeUsuario } from './cuentas';
+import { guardarNombre, guardarNombreSigac, leerNombre, leerNombreSigac } from './almacen';
 import { Aviso, BarraInferior, Boton, Etiqueta, Tarjeta, TarjetaEsqueleto, Titulo, type Icono } from './componentes';
-import { ErrorApi, descargarAnexo, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, type Actuacion, type Expediente } from './api';
+import { ErrorApi, descargarAnexo, marcarVistos, obtenerActuaciones, obtenerEjecuciones, obtenerEstado, obtenerExpedientes, obtenerNovedades, obtenerPerfil, type Actuacion, type Expediente, type Novedad } from './api';
 import { type Destino } from './notificaciones';
 import {
-  canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, tonoDeEstado, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
+  agruparPorDia, nombreParaSaludo, primerNombre, canalesDeAviso, duracionTexto, fechaHoraBogota, parsearDescripcion, tipoDireccion, tonoDeEstado, proximaRevision, resumenDeEjecucion, resumenDeEstado, type Ejecucion, type EstadoMonitor,
 } from './revisiones';
 import { colores, espacio, radios } from './tema';
 
@@ -19,9 +20,9 @@ type Props = {
   destino?: Destino | null; onDestinoAtendido?: () => void; correo?: string;
 };
 
-const saludo = () => {
+const saludo = (nombre = '') => {
   const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Bogota', hour: '2-digit', hour12: false }).format(new Date()));
-  return h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches';
+  return `${h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'}${nombre ? `, ${nombre}` : ''}`;
 };
 const mensajeDe = (err: unknown, otro = 'No se completó la operación.') => (err instanceof ErrorApi ? err.message : otro);
 
@@ -30,6 +31,23 @@ export default function Principal({ token, correo, biometria, version, onBiometr
   const [estado, setEstado] = useState<EstadoMonitor>();
   const [ejecuciones, setEjecuciones] = useState<Ejecucion[]>();
   const [expedientes, setExpedientes] = useState<Expediente[] | null>();  // null: el servidor aún no ofrece el listado
+  const [novedades, setNovedades] = useState<Novedad[] | null>();  // null: el servidor aún no ofrece las novedades
+  const [nombre, setNombre] = useState('');
+  useEffect(() => { void leerNombre().then(n => setNombre(nombreParaSaludo(n))).catch(() => undefined); }, []);
+  const [nombreSigac, setNombreSigac] = useState('');
+  useEffect(() => {  // el nombre de SIGAC se pide una vez (como mucho una vez al día si falla) y se guarda solo en este teléfono
+    let vivo = true;
+    void (async () => {
+      const guardado = await leerNombreSigac();
+      if (guardado?.nombre) { if (vivo) setNombreSigac(guardado.nombre); return; }
+      if (guardado && Date.now() - guardado.intento < 86400000) return;
+      let encontrado = '';
+      try { encontrado = nombreParaSaludo((await obtenerPerfil(token)).nombre); } catch { /* sin nombre: Ajustes ofrece escribirlo */ }
+      await guardarNombreSigac(encontrado, Date.now());
+      if (vivo && encontrado) setNombreSigac(encontrado);
+    })().catch(() => undefined);
+    return () => { vivo = false; };
+  }, [token]);
   const [error, setError] = useState('');
   const [refrescando, setRefrescando] = useState(false);
   const [reconectando, setReconectando] = useState(false);
@@ -53,6 +71,7 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     setRefrescando(true);
     try {
       obtenerExpedientes(token).then(r => setExpedientes(r.expedientes), () => setExpedientes(prev => prev ?? null));
+      obtenerNovedades(token).then(r => setNovedades(r.novedades), () => setNovedades(prev => prev ?? null));
       const [e, x] = await Promise.all([obtenerEstado(token), obtenerEjecuciones(token).catch(() => ({ ejecuciones: [] as Ejecucion[] }))]);  // el historial es secundario: si falla, el resto sigue
       setEstado(e); setEjecuciones(x.ejecuciones); setError('');
     } catch (err) {
@@ -87,22 +106,25 @@ export default function Principal({ token, correo, biometria, version, onBiometr
     <ScrollView contentContainerStyle={s.pagina} refreshControl={<RefreshControl refreshing={refrescando} onRefresh={() => { void cargar(); }} tintColor={colores.marino} />}>
       <Image source={require('../assets/huellas.png')} accessible={false} resizeMode="contain" style={s.huellas} />
       {error !== '' && <Aviso texto={error} />}
-      {pestana === 'inicio' && <Inicio estado={estado} onConectar={() => setReconectando(true)} />}
+      {pestana === 'inicio' && <Inicio estado={estado} nombre={nombre || primerNombre(nombreSigac)} onConectar={() => setReconectando(true)} />}
       {pestana === 'casos' && <Casos estado={estado} expedientes={expedientes} token={token} onCambio={setExpedientes} onError={setError} onAbrir={setAbierto} />}
+      {pestana === 'novedades' && <Novedades novedades={novedades} expedientes={expedientes} token={token} onCambio={setNovedades} onExpedientes={setExpedientes}
+        onError={setError} onAbrir={setAbierto} />}
       {pestana === 'actividad' && <Actividad ejecuciones={ejecuciones} />}
       {pestana === 'ajustes' && <Ajustes token={token} usuario={usuario} correo={correo} estado={estado} biometria={biometria} version={version}
+        nombre={nombre} nombreSigac={nombreSigac} onNombre={n => { const limpio = nombreParaSaludo(n); setNombre(limpio); void guardarNombre(limpio); }}
         onBiometria={onBiometria} onSalir={onSalir} onReconectar={() => setReconectando(true)} onCuenta={setCuenta}
         seccion={seccionAjustes} onSeccion={setSeccionAjustes} />}
     </ScrollView>
-    <BarraInferior activa={pestana} onElegir={setPestana} />
+    <BarraInferior activa={pestana} onElegir={setPestana} insignias={{ novedades: (novedades ?? []).filter(x => !x.vista).length }} />
   </View>;
 }
 
-function Inicio({ estado, onConectar }: { estado?: EstadoMonitor; onConectar: () => void }) {
+function Inicio({ estado, nombre, onConectar }: { estado?: EstadoMonitor; nombre: string; onConectar: () => void }) {
   const resumen = estado ? resumenDeEstado(estado) : undefined;
   const proxima = proximaRevision(new Date());
   return <>
-    <Titulo texto={saludo()} subtitulo="Resumen del seguimiento de tu cuenta de SIGAC" />
+    <Titulo texto={saludo(nombre)} subtitulo="Resumen del seguimiento de tu cuenta de SIGAC" />
     {!estado ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto /></> : <>
       {!estado.credenciales_guardadas && <Tarjeta>
         <Text style={s.fuerte}>Conecta tu cuenta de SIGAC</Text>
@@ -195,6 +217,64 @@ function Casos({ estado, expedientes, token, onCambio, onError, onAbrir }: { est
   </>;
 }
 
+function Novedades({ novedades, expedientes, token, onCambio, onExpedientes, onError, onAbrir }: {
+  novedades?: Novedad[] | null; expedientes?: Expediente[] | null; token: string; onCambio: (n: Novedad[]) => void;
+  onExpedientes: (e: Expediente[]) => void; onError: (m: string) => void; onAbrir: (x: Expediente) => void;
+}) {
+  const lista = novedades ?? [];
+  const sinVer = lista.filter(x => !x.vista).length;
+
+  async function abrir(n: Novedad) {
+    const x = expedientes?.find(e => e.id === n.expediente);
+    if (!x) return;
+    onAbrir(x);
+    if (!n.vista || x.novedades_no_vistas || x.nuevo) {
+      onCambio(lista.map(y => (y.expediente === n.expediente ? { ...y, vista: true } : y)));
+      onExpedientes((expedientes ?? []).map(y => (y.id === x.id ? { ...y, novedades_no_vistas: 0, nuevo: false } : y)));
+      try { await marcarVistos(token, x.id); } catch (err) { onError(mensajeDe(err)); }
+    }
+  }
+  async function verTodas() {
+    onCambio(lista.map(y => ({ ...y, vista: true })));
+    onExpedientes((expedientes ?? []).map(y => ({ ...y, novedades_no_vistas: 0, nuevo: false })));
+    try { await marcarVistos(token); } catch (err) { onError(mensajeDe(err)); }
+  }
+
+  return <>
+    <Titulo texto="Novedades" subtitulo="Solo las actuaciones nuevas, de la más reciente a la más antigua" />
+    {novedades === undefined ? <><TarjetaEsqueleto lineas={3} /><TarjetaEsqueleto lineas={3} /></> :
+      novedades === null ? <Tarjeta><Text style={s.cuerpo}>Las novedades aún no están disponibles en el servidor. Tinotify sigue vigilando tu cuenta y te avisará de lo nuevo.</Text></Tarjeta> : <>
+      {sinVer > 0 && <View style={s.barraVistos}>
+        <Text style={[s.cuerpo, { flex: 1 }]}>{sinVer === 1 ? '1 novedad sin ver' : `${sinVer} novedades sin ver`}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Marcar todas las novedades como vistas" onPress={() => { void verTodas(); }} style={s.botonVistos}>
+          <Ionicons name="checkmark-done" size={18} color={colores.marino} />
+          <Text style={s.botonVistosTxt}>Marcar vistas</Text>
+        </Pressable>
+      </View>}
+      {lista.length === 0 ? <Tarjeta><Text style={s.cuerpo}>Todavía no hay novedades. Cuando aparezca una actuación nueva en cualquiera de tus expedientes, la verás aquí con su detalle.</Text></Tarjeta> :
+        agruparPorDia(lista).map(g => <View key={g.dia}>
+          <Text style={s.seccion}>{g.dia}</Text>
+          {g.items.map(n => <Pressable key={n.id} accessibilityRole="button" onPress={() => { void abrir(n); }}>
+            <Tarjeta>
+              <View style={s.fila}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.radicado}>RADICADO {n.numero}</Text>
+                  <Text style={s.fuerte}>{n.etapa || 'Actuación'}</Text>
+                  <Text style={s.cuerpo} numberOfLines={1}>{n.cliente}</Text>
+                </View>
+                {!n.vista && <Etiqueta texto="Nueva" tono="lima" />}
+              </View>
+              {(n.origen || n.destino) && <Sentido origen={n.origen} destino={n.destino} />}
+              {n.resumen !== '' && <Text style={s.cuerpo} numberOfLines={3}>{n.resumen}</Text>}
+              <Text style={s.pequeno}>Actuación del {fechaHoraBogota(n.fecha)} · detectada {fechaHoraBogota(n.detectada_en)}{n.anexos > 0 ? ` · ${n.anexos} ${n.anexos === 1 ? 'anexo' : 'anexos'}` : ''}</Text>
+            </Tarjeta>
+          </Pressable>)}
+        </View>)}
+      {lista.length > 0 && <Text style={s.pequeno}>Se conservan 90 días. «Detectada» es cuando Tinotify la vio en SIGAC. Hora de Bogotá.</Text>}
+    </>}
+  </>;
+}
+
 function Actividad({ ejecuciones }: { ejecuciones?: Ejecucion[] }) {
   return <>
     <Titulo texto="Actividad" subtitulo="Historial de revisiones de tu cuenta" />
@@ -263,8 +343,8 @@ function Anexo({ anexo, token, expediente, actuacion, indice }: { anexo: Actuaci
 
 function Sentido({ origen, destino }: { origen: string; destino: string }) {
   const tipo = tipoDireccion(origen, destino);
-  const fondo = tipo === 'estudiante_asesor' ? colores.azulChip : tipo === 'asesor_estudiante' ? colores.limaSuave : colores.superficie;
-  const borde = tipo === 'estudiante_asesor' ? colores.marinoSuave : tipo === 'asesor_estudiante' ? '#7FA82B' : colores.borde;
+  const fondo = tipo === 'estudiante_asesor' ? colores.azulChip : tipo === 'asesor_estudiante' ? colores.limaSuave : tipo === 'direccion' ? '#FFF1D6' : colores.superficie;
+  const borde = tipo === 'estudiante_asesor' ? colores.marinoSuave : tipo === 'asesor_estudiante' ? '#7FA82B' : tipo === 'direccion' ? '#E39B00' : colores.borde;
   return <View accessibilityLabel={`De ${origen} a ${destino}`} style={[s.sentido, { backgroundColor: fondo, borderColor: borde }]}>
     <Text style={s.sentidoTxt}>{origen}</Text>
     <Ionicons name="arrow-forward" size={16} color={colores.marino} />
@@ -328,7 +408,7 @@ function DetalleExpediente({ token, expediente, onVolver }: { token: string; exp
             {a.anexos.map((x, j) => <Anexo key={j} anexo={x} token={token} expediente={expediente.id} actuacion={i} indice={j} />)}
           </View>}
         </Tarjeta>))}
-      <Text style={s.pequeno}>Lectura en vivo desde SIGAC a través de tu cuenta. Tinotify no guarda el contenido de las actuaciones.</Text>
+      <Text style={s.pequeno}>Lectura en vivo desde SIGAC a través de tu cuenta. Tinotify no guarda este historial; solo una ficha corta y cifrada de cada actuación nueva, por 90 días, para Novedades.</Text>
     </ScrollView>
   </View>;
 }

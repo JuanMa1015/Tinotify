@@ -89,6 +89,8 @@ test('la dirección de la actuación se reconoce sin importar mayúsculas', () =
   assert.equal(tipoDireccion('ESTUDIANTE', 'ASESOR'), 'estudiante_asesor');
   assert.equal(tipoDireccion(' Asesor ', 'estudiante'), 'asesor_estudiante');
   assert.equal(tipoDireccion('X', 'Y'), 'otra');
+  assert.equal(tipoDireccion('ASESOR', 'DIRECCIÓN'), 'direccion');
+  assert.equal(tipoDireccion('Direccion', 'Asesor'), 'direccion');
 });
 
 
@@ -112,4 +114,37 @@ test('el estado del expediente se clasifica para colorearlo', () => {
   assert.equal(tonoDeEstado('Terminado'), 'cerrado');
   assert.equal(tonoDeEstado('Archivado'), 'cerrado');
   assert.equal(tonoDeEstado('Reparto'), 'otro');
+});
+
+
+import { agruparPorDia, etiquetaDia } from '../src/revisiones.ts';
+
+test('las novedades se agrupan por día de Bogotá', () => {
+  const ahora = new Date('2026-11-18T20:00:00Z');
+  assert.equal(etiquetaDia('2026-11-18T17:30:00Z', ahora), 'Hoy');
+  assert.equal(etiquetaDia('2026-11-18T04:00:00Z', ahora), 'Ayer'); // 23:00 del 17 en Bogotá
+  assert.match(etiquetaDia('2026-11-10T12:30:00Z', ahora), /^10 nov/);
+  assert.equal(etiquetaDia('basura', ahora), '--');
+  const g = agruparPorDia([{ detectada_en: '2026-11-18T17:30:00Z' }, { detectada_en: '2026-11-18T12:30:00Z' }, { detectada_en: '2026-11-17T12:30:00Z' }], ahora);
+  assert.deepEqual(g.map(x => [x.dia, x.items.length]), [['Hoy', 2], ['Ayer', 1]]);
+});
+
+
+import { nombreParaSaludo } from '../src/revisiones.ts';
+
+test('el nombre del saludo se limpia y se acota', () => {
+  assert.equal(nombreParaSaludo('  Ana   María  '), 'Ana María');
+  assert.equal(nombreParaSaludo(null), '');
+  assert.equal(nombreParaSaludo('   '), '');
+  assert.equal(nombreParaSaludo('x'.repeat(80)).length, 40);
+});
+
+
+import { primerNombre } from '../src/revisiones.ts';
+
+test('el saludo usa el primer nombre con inicial mayúscula', () => {
+  assert.equal(primerNombre('MARIA JOSE PEREZ DIAZ'), 'Maria');
+  assert.equal(primerNombre('  ñandú  lópez '), 'Ñandú');
+  assert.equal(primerNombre(''), '');
+  assert.equal(primerNombre(null), '');
 });
