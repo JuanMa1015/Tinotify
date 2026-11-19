@@ -12,11 +12,13 @@ Un servicio que, con tu autorización, entra a tu cuenta de SIGAC tres veces al 
 | Dato | Para qué | Cómo se protege |
 |---|---|---|
 | Usuario y contraseña de SIGAC | Iniciar sesión en tu nombre para revisar tu cuenta | Cifrados (AES-256-GCM) en el servidor. La llave solo existe en la configuración del servicio de aplicación, no en la base de datos. Nunca se guardan en tu teléfono. |
-| Huellas de tus actuaciones | Detectar qué es nuevo comparando con la revisión anterior | Resúmenes con clave (HMAC): no permiten reconstruir el texto. **No guardamos el contenido de tus actuaciones.** |
+| Huellas de tus actuaciones | Detectar qué es nuevo comparando con la revisión anterior | Resúmenes con clave (HMAC): no permiten reconstruir el texto. |
+| Ficha de cada actuación **nueva** (fecha, etapa, sentido, remitente y un extracto de hasta 240 caracteres de su texto) | Mostrarte el apartado de Novedades y detallar los avisos | Cifrada (AES-256-GCM), ligada a su expediente; se conserva **90 días** y luego se borra. No guardamos el historial completo de tus actuaciones ni sus anexos: el detalle y los archivos se leen de SIGAC cuando los abres. Pueden contener datos personales de terceros. |
 | Listado de tus expedientes (radicado, nombre del cliente y estado, tal como los muestra SIGAC) | Mostrarte la lista de expedientes al instante y señalar cuáles tienen novedades | Cifrados (AES-256-GCM) con la misma llave del servicio, ligados a cada expediente: la base de datos solo contiene texto cifrado. Se descifran en el servidor únicamente para enviártelos a ti. Contienen datos personales de terceros (nombres de clientes): tú eres responsable de tener autorización para tratarlos. |
+| Tu nombre en SIGAC | Saludarte por tu nombre en la app | El servidor lo lee del encabezado de SIGAC cuando la app lo pide y lo entrega a tu teléfono; **no se guarda en el servidor ni en la base de datos**. En el teléfono se conserva en el almacén seguro y se borra al cerrar sesión. |
 | Conteos y resultados de revisión | Mostrar el estado y decidir si avisar | Solo cifras y estados (por ejemplo "ok" o "error de acceso"). |
 | Código de acceso al servidor | Autenticar tu app ante el servidor | Almacén seguro del teléfono; con huella o rostro si lo activas. |
-| Destino de avisos (correo o dispositivo) | Enviarte los avisos | Solo para avisos. Los avisos no incluyen datos del caso. |
+| Destino de avisos (correo o dispositivo) | Enviarte los avisos | Solo para avisos. Los avisos nombran el radicado y la etapa de la actuación nueva; en el correo, además, el nombre del cliente. |
 
 Durante cada revisión el servidor lee tu historial de SIGAC **en memoria** para calcular las huellas y lo descarta al terminar. Las cookies de SIGAC viven solo en memoria durante la lectura. La app móvil no usa cookies, rastreadores ni analítica.
 

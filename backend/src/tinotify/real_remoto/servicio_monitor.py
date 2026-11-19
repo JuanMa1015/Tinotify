@@ -9,8 +9,9 @@ from tinotify.integrations.sigac.sigac_client import SigacClientError, SigacSess
 from tinotify.parsers.diagnostico_historial import CodigoHistorial
 from tinotify.real_remoto.almacen import AlmacenNoDisponible
 from tinotify.real_remoto.cifrado import (
-    CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, descifrar_credenciales, descifrar_expediente)
-from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, descargar_un_anexo, leer_expedientes, leer_un_expediente
+    CifradoNoValido, VERSION_LLAVE, cifrar_credenciales, cifrar_expediente, cifrar_novedad, descifrar_credenciales, descifrar_expediente,
+    descifrar_novedad)
+from tinotify.real_remoto.monitor import caso_ref, clave_de_usuario, descargar_un_anexo, leer_expedientes, leer_nombre, leer_un_expediente
 from tinotify.real_remoto.sesiones import DemasiadosIntentosLogin, SesionOcupada
 
 registro = logging.getLogger("tinotify.real_remoto")
@@ -44,6 +45,7 @@ class ServicioMonitor:
         self._clave = clave_acreditacion if usuario is None else clave_de_usuario(clave_acreditacion, usuario)
         self._llave = config.monitor.clave_cifrado
         self._cache = {}  # caso_ref -> (instante, actuaciones): evita iniciar sesión en SIGAC por cada toque
+        self._nombre = None  # (instante, nombre): el nombre de SIGAC solo se pide una vez por hora, y nunca se guarda en el servidor
         self._refs = {}   # caso_ref -> (instante, {(actuación, anexo): (referencia, archivo)}): solo en memoria, nunca se envían al cliente
 
     def guardar_credenciales(self, usuario, clave, caso_login=None):
@@ -62,18 +64,35 @@ class ServicioMonitor:
             del usuario_sigac, clave, caso_login
         return len(casos)
 
+    def perfil(self):
+        """Nombre de la persona en SIGAC (un inicio de sesión con las credenciales guardadas). No se almacena: la app lo guarda en el teléfono."""
+        if self._nombre and time.monotonic() - self._nombre[0] < 3600:
+            return {"nombre": self._nombre[1]}
+        credenciales = self._almacen.credenciales()
+        if credenciales is None:
+            raise SinCredenciales
+        usuario, clave, caso_login = descifrar_credenciales(self._llave, credenciales[1], credenciales[2])
+        cfg = self._config
+        try:
+            nombre = self._sesiones.con_cliente(lambda cliente: leer_nombre(
+                cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login))
+        finally:
+            del usuario, clave, caso_login
+        self._nombre = (time.monotonic(), nombre)
+        return {"nombre": nombre}
+
     def registrar_dispositivo(self, token):
         self._almacen.registrar_dispositivo(token)
 
     def borrar_dispositivo(self, token):
         return self._almacen.borrar_dispositivo(token)
 
-    def _notificar_push(self, plan, metadatos=None):
+    def _notificar_push(self, plan, metadatos=None, fichas=None):
         """Un intento por aviso nuevo (el correo de Actions sigue siendo el respaldo con reintentos). Solo conteos: nunca radicados
         ni nombres, porque el texto se ve en la pantalla de bloqueo."""
         if self._fcm is None:
             return "no_configurado"
-        cuerpo, pestana, expediente = _texto_push(plan, metadatos)
+        cuerpo, pestana, expediente = _texto_push(plan, metadatos, fichas)
         datos = {"tipo": "novedades", "pestana": pestana, **({"expediente": expediente} if expediente else {})}
         # `privado`: en la pantalla de bloqueo con seguridad el teléfono oculta el texto (que ahora lleva el radicado) hasta desbloquear.
         enviados, invalidos, errores = self._enviar_a_dispositivos(cuerpo, datos, privado=True)
@@ -117,6 +136,40 @@ class ServicioMonitor:
             self._almacen.guardar_expedientes(filas)
         except AlmacenNoDisponible:
             registro.warning("expedientes_sin_almacen")  # el listado se reintenta en la próxima revisión
+
+    def _guardar_novedades(self, plan, fichas):
+        """Guarda, cifrada, la ficha de cada actuación nueva (hasta 50 por expediente y revisión). Lo que no se guarde no afecta el aviso."""
+        filas = []
+        for cambio in plan.cambios:
+            if cambio.accion != "novedades":
+                continue
+            for huella in sorted(cambio.nuevas)[:50]:
+                ficha = fichas.get(cambio.caso_ref, {}).get(huella)
+                if ficha is not None:
+                    nonce, cifrado = cifrar_novedad(self._llave, cambio.caso_ref, ficha)
+                    filas.append((cambio.caso_ref, VERSION_LLAVE, nonce, cifrado))
+        if not filas:
+            return
+        try:
+            self._almacen.guardar_novedades(filas)
+        except AlmacenNoDisponible:
+            registro.warning("novedades_sin_almacen")
+
+    def novedades(self, limite=100):
+        """Feed de actuaciones nuevas, la más reciente primero, con el expediente al que pertenecen."""
+        por_ref = {e["id"]: e for e in self.expedientes()}
+        salida = []
+        for id_, ref, _, nonce, cifrado, vista, detectada in self._almacen.novedades(limite):
+            expediente = por_ref.get(ref)
+            if expediente is None:
+                continue
+            try:
+                ficha = descifrar_novedad(self._llave, ref, nonce, cifrado)
+            except CifradoNoValido:
+                continue
+            salida.append({"id": id_, "expediente": ref, "numero": expediente["numero"], "cliente": expediente["cliente"],
+                           "vista": vista, "detectada_en": detectada, **ficha})
+        return salida
 
     def expedientes(self):
         salida = []
@@ -213,10 +266,11 @@ class ServicioMonitor:
         usuario, clave, caso_login = descifrar_credenciales(self._llave, fila[1], fila[2])  # CifradoNoValido si la llave no coincide
         ejecucion = self._almacen.iniciar_ejecucion()
         cfg = self._config
+        fichas = {}
         try:
             lecturas, fallidos, listados, errores, diagnosticos, metadatos = self._sesiones.con_cliente(lambda cliente: leer_expedientes(
                 cliente, usuario, clave, tipo=cfg.tipo, total_casos=cfg.total_casos, caso_login=caso_login,
-                clave_acreditacion=self._clave, instancia=INSTANCIA_REAL))
+                clave_acreditacion=self._clave, instancia=INSTANCIA_REAL, fichas=fichas))
         except SesionOcupada:
             self._cerrar(ejecucion, "error_interno", codigo="sesion_ocupada")
             raise
@@ -243,8 +297,9 @@ class ServicioMonitor:
             self._cerrar(ejecucion, "error_estado")
             raise
         self._guardar_expedientes(plan, metadatos)
+        self._guardar_novedades(plan, fichas)
         if aviso:
-            estado_push = self._notificar_push(plan, metadatos)
+            estado_push = self._notificar_push(plan, metadatos, fichas)
             try:
                 self._almacen.fijar_canal_aviso(aviso, "push", estado_push)
             except AlmacenNoDisponible:
@@ -266,7 +321,15 @@ def _lista_radicados(numeros):
     return numeros[0] if len(numeros) == 1 else ", ".join(numeros[:-1]) + " y " + numeros[-1]
 
 
-def _texto_push(plan, metadatos=None):
+def _ultima_ficha(cambio, fichas):
+    """La ficha más reciente (por fecha) entre las actuaciones nuevas de un expediente, o None."""
+    if not fichas:
+        return None
+    candidatas = [fichas[cambio.caso_ref][h] for h in cambio.nuevas if h in fichas.get(cambio.caso_ref, {})]
+    return max(candidatas, key=lambda f: f["fecha"]) if candidatas else None
+
+
+def _texto_push(plan, metadatos=None, fichas=None):
     """(texto, pestaña, expediente). Con `metadatos` el texto nombra los radicados (hasta tres); sin ellos, solo conteos.
 
     `expediente` es el identificador opaco del único expediente afectado (la app lo abre directamente al tocar el aviso)."""
@@ -283,6 +346,10 @@ def _texto_push(plan, metadatos=None):
                      f"los radicados {_lista_radicados([x[0] for x in con_novedades])}" if len(con_novedades) <= 3 else
                      f"{len(con_novedades)} expedientes")
             partes.append(f"{_plural(total, 'actuación nueva', 'actuaciones nuevas')} en {donde}")
+            if len(con_novedades) == 1:
+                ficha = _ultima_ficha(next(c for c in cambios if c.accion == "novedades" and c.caso_ref == con_novedades[0][2]), fichas)
+                if ficha and ficha.get("etapa"):
+                    partes[-1] += f": {ficha['etapa']}" + (f" ({ficha['origen']} → {ficha['destino']})" if ficha.get("origen") and ficha.get("destino") else "")
         if nuevos:
             partes.append(f"Expediente nuevo: {nuevos[0][0]}" if len(nuevos) == 1 else f"{len(nuevos)} expedientes nuevos")
         if partes:
@@ -343,5 +410,11 @@ class ServiciosMonitor:
                                      "novedades": x["novedades_no_vistas"], "nuevo": x["nuevo"]}
                                     for x in self.para(dueno).expedientes() if x["novedades_no_vistas"] or x["nuevo"]][:20]
             except Exception:  # noqa: BLE001 - el detalle es opcional: sin él el correo sale con conteos
+                pass
+            try:
+                a["novedades_detalle"] = [{"numero": x["numero"], "etapa": x.get("etapa", ""), "origen": x.get("origen", ""),
+                                          "destino": x.get("destino", ""), "fecha": x.get("fecha", "")}
+                                         for x in self.para(dueno).novedades(15) if not x["vista"]]
+            except Exception:  # noqa: BLE001 - también opcional
                 pass
         return avisos

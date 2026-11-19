@@ -7,7 +7,7 @@ Versión del consentimiento: `consentimiento-v1`. La app guarda la versión acep
 **Resumen:**
 - Guardamos tu usuario y clave de SIGAC cifrados en el servidor.
 - Entramos a SIGAC por ti 3 veces al día para ver si hay novedades.
-- No guardamos el contenido de tus actuaciones: solo resúmenes cifrados, conteos y la lista de tus expedientes (radicado, nombre y estado) cifrada. Puedes borrar todo cuando quieras.
+- No guardamos el historial de tus actuaciones: solo resúmenes cifrados, conteos, la lista de tus expedientes (radicado, nombre y estado) y, por 90 días, una ficha corta de cada actuación nueva (fecha, etapa y un extracto), todo cifrado. Puedes borrar todo cuando quieras.
 
 **Casillas (sin marcar de antemano):**
 1. (obligatoria) Acepto la política de tratamiento de datos y los términos de uso. *[enlaces]*

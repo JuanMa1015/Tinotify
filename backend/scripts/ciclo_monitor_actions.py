@@ -97,6 +97,17 @@ def _linea(x):
     return f"{base}: {n} actuación(es) nueva(s)" if n else base
 
 
+def _detalles(aviso, numero):
+    """Una línea por actuación nueva sin ver del expediente: etapa, sentido y fecha (nunca el texto de la actuación)."""
+    salida = []
+    for d in aviso.get("novedades_detalle") or []:
+        if d.get("numero") != numero or not d.get("etapa"):
+            continue
+        sentido = f" ({d['origen']} → {d['destino']})" if d.get("origen") and d.get("destino") else ""
+        salida.append(f"{d['etapa']}{sentido}" + (f" · {d['fecha'][:10]}" if d.get("fecha") else ""))
+    return salida[:5]
+
+
 def construir_correo(aviso, origen, destino, url_app=None):
     """Correo con el detalle (radicado y nombre de cada expediente con novedades) y dos botones: SIGAC y la app. El correo va al propio
     buzón del usuario; el contenido de las actuaciones nunca se incluye."""
@@ -104,11 +115,13 @@ def construir_correo(aviso, origen, destino, url_app=None):
     mensaje = EmailMessage()
     mensaje["Subject"], mensaje["From"], mensaje["To"] = "Tinotify: hay novedades en SIGAC", origen, destino
     lineas = [_linea(x) for x in expedientes]
-    texto = _resumen(aviso) + ("\n\n" + "\n".join("• " + l for l in lineas) if lineas else "")
+    subs = [_detalles(aviso, x["numero"]) for x in expedientes]
+    texto = _resumen(aviso) + ("\n\n" + "\n".join("• " + l + "".join("\n    – " + d for d in sub) for l, sub in zip(lineas, subs)) if lineas else "")
     texto += f"\n\nIr a SIGAC: {URL_SIGAC}" + (f"\nAbrir Tinotify: {url_app}" if url_app else "")
     texto += "\n\nTinotify no está afiliado a SIGAC. Confirma siempre en el sistema oficial."
     mensaje.set_content(texto)
-    items = "".join(f"<li>{html.escape(l)}</li>" for l in lineas)
+    items = "".join(f"<li>{html.escape(l)}" + "".join(f"<br><span style='color:#52627C;font-size:14px'>– {html.escape(d)}</span>" for d in sub) + "</li>"
+                    for l, sub in zip(lineas, subs))
     boton = "display:inline-block;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:700;margin:6px 8px 6px 0;"
     cuerpo = (f"<div style='font-family:Arial,sans-serif;color:#14213D;max-width:520px'><h2 style='margin:0 0 8px'>Tinotify</h2>"
               f"<p style='font-size:16px'>{html.escape(_resumen(aviso))}</p>" + (f"<ul style='font-size:15px;line-height:1.6'>{items}</ul>" if items else "") +

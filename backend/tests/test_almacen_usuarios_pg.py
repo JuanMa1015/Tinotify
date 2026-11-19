@@ -98,3 +98,23 @@ def test_borrar_una_cuenta_borra_en_cascada_todos_sus_datos_y_no_los_del_propiet
     assert admin.execute("SELECT count(*) FROM tinotify_real.huellas WHERE caso_ref = %s", (H(2),)).fetchone()[0] == 0
     assert admin.execute("SELECT count(*) FROM tinotify_real.expedientes WHERE caso_ref = %s", (H(2),)).fetchone()[0] == 0
     assert [f[0] for f in prop.expedientes()] == [H(1)] and admin.execute("SELECT count(*) FROM tinotify_real.huellas WHERE caso_ref = %s", (H(1),)).fetchone()[0] == 1
+
+
+def test_las_novedades_son_de_su_dueno_se_marcan_vistas_y_caen_con_la_cuenta(mundo):
+    a, admin, (u1, u2) = mundo
+    v1, v2 = a.de(u1), a.de(u2)
+    for vista, ref in ((v1, H(2)), (v2, H(3))):
+        vista.aplicar({ref: Counter({H(50): 1})}, {})
+    nonce, c = cifrado.cifrar_novedad(LLAVE, H(2), {"fecha": "2026-11-18T10:00:00", "etapa": "ETAPA_FICTICIA"})
+    v1.guardar_novedades([(H(2), 1, nonce, c)])
+    assert [(f[1], f[5]) for f in v1.novedades()] == [(H(2), False)] and v2.novedades() == []
+    assert cifrado.descifrar_novedad(LLAVE, H(2), v1.novedades()[0][3], v1.novedades()[0][4])["etapa"] == "ETAPA_FICTICIA"
+    assert v2.marcar_vistos(None) is not None and v1.novedades()[0][5] is False   # otro usuario no las marca
+    v1.marcar_vistos(H(2))
+    assert v1.novedades()[0][5] is True
+    # las de más de 90 días se limpian al guardar nuevas
+    admin.execute("UPDATE tinotify_real.novedades SET detectada_en = now() - interval '100 days'")
+    v1.guardar_novedades([(H(2), 1, nonce, c)])
+    assert len(v1.novedades()) == 1
+    admin.execute("DELETE FROM tinotify_real.usuarios WHERE id = %s::uuid", (u1,))
+    assert admin.execute("SELECT count(*) FROM tinotify_real.novedades").fetchone()[0] == 0
