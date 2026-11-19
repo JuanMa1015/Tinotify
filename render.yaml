@@ -1,25 +1,20 @@
-# DEFINICIÓN DE REFERENCIA del servicio de producción con el backend REAL. En la rama `deploy/real-remoto` este archivo se
-# copia como `render.yaml`. En el repositorio principal queda como propuesta: Render solo lee `render.yaml` y no se aplica solo.
+# DEFINICIÓN DE REFERENCIA del servicio de producción (backend real) en Render. Render solo lee este archivo si el servicio está ligado a un
+# Blueprint; el servicio actual se administra a mano en el panel y este archivo documenta los valores esperados.
+# Guía completa (variables, Secret Files, migraciones, verificación y solución de problemas): docs/despliegue-real-remoto-render.md
 #
-# SUSTITUYE el arranque del servicio existente (https://tinotify.onrender.com): el código sintético sigue en el repositorio pero
-# deja de ejecutarse. No se crea un segundo servicio. Los cambios se hacen a mano en el panel (ver
-# docs/despliegue-real-remoto-render.md), no por Blueprint.
-#
-# CONSERVADO: runtime, plan, rootDir, buildCommand, healthCheckPath, PYTHON_VERSION y --workers 1.
-# CAMBIA: rama (main -> deploy/real-remoto), startCommand y variables (se retiran TINOTIFY_SR_*; se añaden
-# TINOTIFY_RR_* y dos Secret Files).
-#
-# ROLLBACK: rama `main` (commit 4934a3f), startCommand
-#   python -m uvicorn tinotify.sintetico_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers
-# y las TINOTIFY_SR_* guardadas antes del cambio.
+# Se despliega desde `main` con Auto-Deploy al hacer commit, filtrado a `backend/**` para que los cambios de la app o de la documentación no
+# reinicien el servicio. Las variables nuevas de una función se añaden DESPUÉS de desplegar el código que las reconoce.
 services:
   - type: web
-    name: tinotify-api                  # nombre que ya declara el render.yaml de main; el panel manda (verificar)
+    name: tinotify-api                  # el panel manda; este nombre es el del servicio actual
     runtime: python
     plan: free
-    branch: deploy/real-remoto          # rama de despliegue; nunca `main`
+    branch: main
     rootDir: backend
-    autoDeployTrigger: "off"            # los push no despliegan; cada despliegue es manual
+    autoDeployTrigger: commit           # cada commit en main que toque backend/ despliega
+    buildFilter:
+      paths:
+        - backend/**
     buildCommand: python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check
     startCommand: python -m uvicorn tinotify.real_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers --no-access-log
     healthCheckPath: /health
@@ -40,7 +35,9 @@ services:
         sync: false                                    # secreto: se escribe en el panel, no aquí
       # Opcionales (por defecto: TIPO=2, sin TOTAL_CASOS, TTL_MIN=20, MAX_LOGINS=3, VENTANA_LOGIN_MIN=15):
       #   TINOTIFY_RR_TIPO, TINOTIFY_RR_TOTAL_CASOS, TINOTIFY_RR_TTL_MIN, TINOTIFY_RR_MAX_LOGINS, TINOTIFY_RR_VENTANA_LOGIN_MIN
-      # Monitor (OPCIONAL; todas juntas o ninguna): TINOTIFY_RR_PG_HOST, TINOTIFY_RR_PG_PORT (5432), TINOTIFY_RR_PG_DBNAME, TINOTIFY_RR_PG_USER
+      # Monitor, cuentas, push y correo (todas las del monitor juntas): TINOTIFY_RR_PG_HOST, TINOTIFY_RR_PG_PORT (5432), TINOTIFY_RR_PG_DBNAME, TINOTIFY_RR_PG_USER
       #   (tinotify_real_login.<ref>), TINOTIFY_RR_PG_PASSWORD (secreto), TINOTIFY_RR_PG_CA_FILE=/etc/secrets/supabase-ca.crt,
       #   TINOTIFY_RR_CLAVE_CIFRADO (secreto, 32 bytes en base64), TINOTIFY_RR_MONITOR_TOKEN (secreto, distinto del token de la app).
+      #   TINOTIFY_RR_CUENTAS=1 (cuentas), TINOTIFY_RR_FCM_CUENTA_SERVICIO (ruta del Secret File de Firebase),
+      #   TINOTIFY_RR_BREVO_CLAVE (secreto) y TINOTIFY_RR_BREVO_REMITENTE (correo verificado en Brevo).
       # PROHIBIDAS en este servicio (no arranca): TINOTIFY_SR_*, TINOTIFY_REAL_*, SIGAC_*, SUPABASE*, PG*, DATABASE_URL.

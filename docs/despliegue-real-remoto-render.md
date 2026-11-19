@@ -1,128 +1,226 @@
-# Sustituir el backend sintético por el backend real en el servicio Render existente
+# Despliegue y operación de Tinotify
 
-Decisión de producto: Tinotify usará solo datos reales de SIGAC; no hay segundo servicio ni modo sintético en producción. El código
-sintético permanece en el repositorio (no se borra) pero **no se carga** en producción. Los pasos marcados **[AUTORIZACIÓN]**
-modifican Render o ramas remotas y requieren aprobación explícita.
+Guía operativa del servicio en producción: qué piezas lo forman, cómo se configuran, cómo se despliega una versión, cómo se verifica y qué hacer
+cuando algo falla. Para publicar la app Android, ver [lanzamiento](lanzamiento.md). Para el modelo de cuentas, ver [multiusuario](multiusuario.md).
 
-## 0. Configuración REAL confirmada del servicio (por la persona operadora, en el panel)
+> **Regla de oro:** los secretos (claves, tokens, contraseñas, archivos de credenciales) viven **solo** en los paneles de Render, Supabase,
+> GitHub, Firebase y Brevo. Nunca en el repositorio, en capturas ni en el chat.
 
-Repositorio `JuanMa1015/Tinotify` · **rama `main`** (no `deploy/sintetico-render`) · Root Directory `backend/` · Start Command
-`tinotify.sintetico_remoto.app:crear_app` con Uvicorn · Auto-Deploy **Off** · Secret Files disponibles · el servicio tiene el Secret
-File `supabase-ca.crt`.
+## 1. Vista general
 
-**Referencia exacta de lo desplegado.** Git no registra qué commit desplegó Render: con Auto-Deploy Off, solo el panel (*Events* / *Deploys*)
-muestra el hash. No se ha inventado. Lo que sí se sabe: `origin/main` = `4934a3f` («Merge pull request #11 … deploy/sintetico-render»,
-2026-11-15 16:38 -0500) y su árbol de archivos es **idéntico** al de `origin/deploy/sintetico-render` (`611e9a2`); por tanto, si el
-último despliegue fue posterior al 15-nov-2026 16:35, el código en ejecución equivale a `4934a3f`. **Antes de cambiar nada, anota el
-hash que muestre el panel como «commit desplegado».** Es la referencia de recuperación.
+```mermaid
+flowchart LR
+    CRON["GitHub Actions<br/>7:30 · 12:30 · 18:30"] -->|"POST /real/monitor/ejecutar<br/>(token del monitor)"| API["API en Render<br/>FastAPI"]
+    CRON -->|"correo de avisos"| SMTP["Gmail SMTP"]
+    APP["App Android"] <-->|"HTTPS · token de sesión"| API
+    API <-->|"sesión temporal"| SIGAC["SIGAC"]
+    API <-->|"estado cifrado"| DB[("Supabase<br/>PostgreSQL")]
+    API -->|"push"| FCM["Firebase FCM"]
+    API -->|"códigos de acceso"| BREVO["Brevo (API HTTPS)"]
+```
 
-## 1. Qué cambia y qué se pierde
-
-| | Antes (sintético, `main`) | Después (real, `deploy/real-remoto`) |
+| Pieza | Para qué sirve | Dónde se administra |
 | --- | --- | --- |
-| Rama del servicio | `main` | `deploy/real-remoto` |
-| Arranque | `python -m uvicorn tinotify.sintetico_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers` | `python -m uvicorn tinotify.real_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers --no-access-log` |
-| Rutas | `/health` `{"estado":"ok"}`, `/sintetico/*` | `/health` `{"status":"ok"}`, `/real/*` |
-| Datos | ficticios, PostgreSQL (Supabase) | SIGAC real, solo memoria; sin base de datos |
-| Conservado | build, `rootDir: backend`, `healthCheckPath: /health`, `PYTHON_VERSION`, 1 worker, plan, URL, Auto-Deploy Off | |
+| **API (Render)** | Lee SIGAC por cada persona, compara con lo guardado, guarda el estado cifrado y atiende a la app | Panel de Render |
+| **Base de datos (Supabase)** | Esquema `tinotify_real`: cuentas, estado de seguimiento y avisos (solo datos cifrados o huellas con clave) | SQL Editor de Supabase |
+| **Revisiones programadas (GitHub Actions)** | Dispara la revisión tres veces al día, envía los correos de aviso y mantiene despierto el servicio en horario laboral | Pestaña *Actions* del repositorio |
+| **Notificaciones push (Firebase)** | Avisos al teléfono | Consola de Firebase |
+| **Correo de códigos (Brevo)** | Envía los códigos de acceso (Render gratuito bloquea el SMTP saliente) | Panel de Brevo |
+| **APK (GitHub Releases)** | Distribución de la app, compilada por GitHub Actions | Pestaña *Releases* |
 
-Se pierde en producción: la API `/sintetico/*`, su monitor, la conexión a Supabase y, hasta que se actualice la app, cualquier pantalla
-de Android que use `/sintetico/*` o `127.0.0.1`. Supabase y su esquema no se modifican. `main` tampoco: el servicio deja de leerla.
-El código real **no importa nada** de `tinotify.sintetico_remoto` ni carga `psycopg` (prueba automática) y sus dependencias de terceros
-están cubiertas por `backend/requirements.txt`, que es idéntico al de `main`.
+## 2. Servicio en Render
 
-## 2. La rama `deploy/real-remoto`
+Servicio web `tinotify-api` (plan gratuito). El panel manda; [`render.yaml`](../render.yaml) documenta los valores esperados.
 
-Base: **`origin/main` (`4934a3f`)**, para que el servicio solo cambie de rama y conserve todo lo ya desplegado. Sobre esa base se añaden
-únicamente los cambios del backend real:
-- **Nuevos** (103 archivos): `backend/src/tinotify/real_remoto/`, servicios y scripts del backend real, pruebas y documentación.
-- **Modificados que conservan mis cambios** (`.gitignore`, `identificadores.py`, `sigac_client.py`, `casos_parser.py`, `avisos_persistentes.py`,
-  `seguimiento.py`, `docs/etapa-4b.md`) y los dos archivos del parser que `main` tiene en una versión anterior (`parser.py` y
-  `diagnostico_historial.py`: el árbol de trabajo es un superconjunto de la versión de `main`, solo con ampliaciones).
-- **Sin tocar, tal como están en `main`**: `backend/src/tinotify/sintetico_remoto/*` (incluido `datos.py`), `backend/tests/test_sintetico_postgres_config.py`,
-  `supabase/`, `.github/`, `docs/preflight-supabase-4b4b.md`, requirements.
-- **No incluidas**: `test_sintetico_remoto.py`, `integration/test_sintetico_postgres.py` e `integration/test_sintetico_reversion.py`, del árbol de trabajo
-  (instantánea anterior del paquete sintético, incompatible con la versión de `main`; la prueba de `main` sobre el sintético, `test_sintetico_postgres_config.py`, sí se conserva).
-- **`render.yaml`**: el de `main` con rama, arranque y variables del backend real (referencia; el servicio existente se edita en el panel).
-- **Nunca**: `mobile/`, APK, bases SQLite, `backend/.local/`, Secret Files, texto judicial.
+| Ajuste | Valor |
+| --- | --- |
+| Repositorio / rama | `JuanMa1015/Tinotify` · **`main`** |
+| Root Directory | `backend` |
+| Runtime | Python 3 (`PYTHON_VERSION=3.11.18`) |
+| Build Command | `python -m pip install --require-hashes --only-binary=:all: -r requirements.txt -r requirements-build.txt && python scripts/install_local.py && python -m pip check` |
+| Start Command | `python -m uvicorn tinotify.real_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers --no-access-log` |
+| Health Check Path | `/health` |
+| Auto-Deploy | *On Commit* (o *Off* si prefieres desplegar a mano) |
+| Build Filters → Included Paths | `backend/**` (los cambios de la app o de la documentación no reinician el servicio) |
 
-Verificación sin crear nada: `verificar_rama_despliegue.py` (rutas prohibidas, 9 secretos de este equipo, claves privadas, URLs con
-contraseña, JWT y 1.237 fragmentos de texto judicial real de v1 en solo lectura; imprime solo conteos y rutas infractoras).
+Notas:
+- Un solo *worker*: el estado de sesión de SIGAC vive en memoria y solo debe haber un acceso a la vez.
+- **No ligar el servicio a un Blueprint**: el `render.yaml` es una referencia, no la fuente de verdad.
+- El plan gratuito **duerme tras 15 minutos sin tráfico** (el primer acceso tarda hasta un minuto) y ofrece 750 horas al mes por espacio de
+  trabajo. El flujo `mantener-despierto` lo mantiene despierto de 8:00 a 17:59 (hora de Bogotá), unas 300 horas al mes.
 
-## 3. Cambios en Render **[AUTORIZACIÓN]**
+### 2.1 Variables de entorno
 
-Antes: anota rama, Start Command, Build Command, **commit desplegado** y la lista de variables; guarda en tu gestor de contraseñas los
-valores de las `TINOTIFY_SR_*` (sin ellos no hay rollback de configuración). El Secret File `supabase-ca.crt` **se deja** (el servicio real
-no lo lee; así el rollback no necesita volver a subirlo).
+Todas llevan el prefijo `TINOTIFY_RR_`. **Una variable desconocida impide el arranque** (el log da solo su nombre), por eso las variables de una
+función nueva se añaden **después** de desplegar el código que las reconoce (ver §6).
 
-1. **Secret Files** — añadir `acreditacion_sigac.json` y `referencia_portable.json` (desde `backend/.local/`), nombres exactos (quedan en `/etc/secrets/`).
-2. **Variables** — retirar: `TINOTIFY_SR_MODO`, `TLS`, `PROXIES_CONFIABLES`, `TOKEN`, `ALMACEN`, `INTERVALO_S` y todas las `TINOTIFY_SR_PG_*`
-   (host, puerto, modo, base, usuario, contraseña, CA, conexiones). Conservar `PYTHON_VERSION=3.11.18`. Añadir `TINOTIFY_RR_MODO=remoto`,
-   `TINOTIFY_RR_TLS=proxy`, `TINOTIFY_RR_PROXIES_CONFIABLES=privadas`, `TINOTIFY_RR_ACREDITACION_FILE=/etc/secrets/acreditacion_sigac.json`,
-   `TINOTIFY_RR_REFERENCIA_FILE=/etc/secrets/referencia_portable.json` y `TINOTIFY_RR_TOKEN` (secreto nuevo ≥ 32 caracteres, no el sintético).
-   Opcionales: `TINOTIFY_RR_TIPO` (2), `TINOTIFY_RR_TOTAL_CASOS`, `TINOTIFY_RR_TTL_MIN` (20), `TINOTIFY_RR_MAX_LOGINS` (3),
-   `TINOTIFY_RR_VENTANA_LOGIN_MIN` (15). Prohibidas (el servicio no arranca; el log da solo sus **nombres**): `TINOTIFY_SR_*`,
-   `TINOTIFY_REAL_*`, `SIGAC_*`, `SUPABASE*`, `PG*`, `DATABASE_URL`.
-3. **Settings** — Branch → `deploy/real-remoto`; Start Command → el de la sección 1; Build Command y Health Check Path sin cambios
-   (comprobar que coinciden con `render.yaml`); Auto-Deploy Off.
-4. **Manual Deploy** → *Deploy latest commit*. Si el arranque se rechaza, Render debería mantener el deploy anterior (a confirmar en el panel).
+| Variable | Obligatoria | Valor / descripción |
+| --- | --- | --- |
+| `MODO` | Sí | `remoto` |
+| `TLS` | Sí | `proxy` (el TLS termina en el proxy de Render) |
+| `PROXIES_CONFIABLES` | Con `TLS=proxy` | `privadas` (o un rango CIDR ≥ /24 si el log muestra `transporte_rechazado`) |
+| `TOKEN` | Sí | **Secreto.** Código de acceso del propietario (≥ 32 caracteres) |
+| `ACREDITACION_FILE` | Sí | `/etc/secrets/acreditacion_sigac.json` (Secret File) |
+| `REFERENCIA_FILE` | Sí | `/etc/secrets/referencia_portable.json` (Secret File) |
+| `PG_HOST`, `PG_PORT`, `PG_DBNAME` | Sí | Pooler **de sesión** de Supabase (puerto 5432) |
+| `PG_USER` | Sí | `tinotify_real_login.<ref-del-proyecto>` (login restringido, no el administrador) |
+| `PG_PASSWORD` | Sí | **Secreto.** Contraseña de ese login |
+| `PG_CA_FILE` | Sí | `/etc/secrets/supabase-ca.crt` (Secret File; TLS `verify-full`) |
+| `CLAVE_CIFRADO` | Sí | **Secreto.** 32 bytes en base64: llave AES-256-GCM de credenciales, expedientes, fichas y correos. **Si se pierde, no se puede descifrar nada; guarda una copia fuera de Render** |
+| `MONITOR_TOKEN` | Sí | **Secreto.** Token de GitHub Actions (distinto del `TOKEN`) |
+| `CUENTAS` | Para cuentas de usuario | `1` activa `/auth/*` y `/admin/*` |
+| `FCM_CUENTA_SERVICIO` | Para push | Ruta del Secret File con la cuenta de servicio de Firebase |
+| `BREVO_CLAVE` | Para códigos por correo | **Secreto.** Clave de API de Brevo (`xkeysib-…`). Requiere `CUENTAS=1` |
+| `BREVO_REMITENTE` | Con `BREVO_CLAVE` | Correo remitente **verificado** en Brevo |
+| `TIPO`, `TOTAL_CASOS`, `TTL_MIN`, `MAX_LOGINS`, `VENTANA_LOGIN_MIN` | No | Ajustes finos del acceso a SIGAC (por defecto `2`, sin total, 20, 3 y 15) |
 
-## 4. Verificaciones sin SIGAC
+**Prohibidas** (el servicio no arranca): `TINOTIFY_SR_*`, `TINOTIFY_REAL_*`, `SIGAC_*`, `SUPABASE*`, `PG*` sin prefijo y `DATABASE_URL`.
 
-Antes del cambio: `verificar_remoto_real.py --url https://tinotify.onrender.com` → `"aplicacion": "sintetico"`. Después:
+### 2.2 Secret Files
+
+`acreditacion_sigac.json`, `referencia_portable.json`, `supabase-ca.crt` y el JSON de la cuenta de servicio de Firebase. Quedan en `/etc/secrets/`.
+
+## 3. Base de datos (Supabase)
+
+Esquema `tinotify_real`, con acceso cerrado: RLS forzado en todas las tablas, sin permisos para `anon`, `authenticated` ni `service_role`, y la
+Data API sin exponerlo. La API entra con un login restringido (`tinotify_real_login`, miembro de `tinotify_real_app`) con los privilegios mínimos.
+Las migraciones viven en [`supabase/propuestas/`](../supabase/propuestas) y se aplican **a mano** en el *SQL Editor*, en este orden. Cada una es una
+sola transacción (si algo falla no queda nada a medias) y tiene su `_down.sql` de reversión.
+
+| # | Migración | Qué añade |
+| --- | --- | --- |
+| 1 | `20261117000000_crear_almacen_real` | Credenciales cifradas, estado y huellas de expedientes, avisos, ejecuciones, dispositivos |
+| 2 | `20261118000000_crear_cuentas_real` | Usuarios, invitaciones y sesiones |
+| 3 | `20261118010000_crear_expedientes_real` | Listado de expedientes cifrado |
+| 4 | `20261118020000_estado_canales_avisos` | Estado de entrega por push y por correo |
+| 5 | `20261118030000_datos_por_usuario` | Datos y credenciales por usuario |
+| 6 | `20261118040000_correo_de_aviso` | Correo cifrado del usuario para los avisos |
+| 7 | `20261118050000_novedades` | Fichas cifradas de las actuaciones nuevas (90 días) |
+| 8 | `20261118060000_recuperacion_clave` | Códigos de acceso de un solo uso (solo su hash) |
+| 9 | `20261118070000_admin_usuarios` | Permisos para el panel de administración |
+
+Primera vez: tras la migración 1, crea el login restringido **tú mismo**, sin escribir la contraseña en ningún sitio compartido:
+
+```sql
+CREATE ROLE tinotify_real_login LOGIN INHERIT;
+GRANT tinotify_real_app TO tinotify_real_login;
+-- En psql:  \password tinotify_real_login
+```
+
+Comprobación (debe listar las tablas con RLS forzado):
+
+```sql
+SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'tinotify_real' AND c.relkind = 'r' ORDER BY 1;
+```
+
+**Validación local** (sin tocar Supabase): `bash supabase/checks/validar_cuentas_real_python.sh` levanta un PostgreSQL 17 desechable en Docker,
+aplica cada migración (alta, baja y alta de nuevo) y ejecuta las pruebas contra la base real. Si el cambio toca la base, se corre antes del PR.
+
+## 4. Automatización (GitHub Actions)
+
+| Flujo | Cuándo corre | Qué hace |
+| --- | --- | --- |
+| `monitor-real` | 7:30, 12:30 y 18:30 (Bogotá) y a mano | Dispara la revisión de cada persona, envía los correos de aviso y confirma su entrega |
+| `mantener-despierto` | Cada 10 min, de 8:00 a 17:59 (Bogotá) | `GET /health` para que Render no duerma |
+| `apk-release` | Con una etiqueta `vX.Y.Z` o a mano | Compila, firma y publica el APK ([lanzamiento](lanzamiento.md)) |
+| `backend-tests` | En cada PR y push a `main` | Pruebas del backend en Linux y Windows |
+| `referencia-pg1711` | En los PR que modifican ese mismo flujo | Prueba de referencia del esquema sintético contra PostgreSQL 17.11 |
+
+Configuración en *Settings → Secrets and variables → Actions*:
+
+| Nombre | Tipo | Usa | Descripción |
+| --- | --- | --- | --- |
+| `TINOTIFY_URL` | Variable | `monitor-real`, `mantener-despierto` | `https://tinotify.onrender.com` |
+| `TINOTIFY_CORREO_ACTIVO` | Variable | `monitor-real` | `1` para enviar correos de aviso |
+| `TINOTIFY_MONITOR_TOKEN` | Secreto | `monitor-real` | Igual a `MONITOR_TOKEN` de Render |
+| `TINOTIFY_SMTP_USUARIO`, `TINOTIFY_SMTP_CLAVE` | Secretos | `monitor-real` | Cuenta de Gmail y su **contraseña de aplicación** para los correos de aviso |
+| `TINOTIFY_CORREO_DESTINO` | Secreto | `monitor-real` | Correo de aviso del propietario (opcional) |
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `GOOGLE_SERVICES_JSON` | Secretos | `apk-release` | Ver [lanzamiento](lanzamiento.md) |
+
+GitHub puede retrasar los cron unos minutos. Si una revisión programada no se hace, la app lo muestra en Inicio como **«Revisión atrasada»**.
+
+## 5. Servicios externos
+
+**Brevo** (códigos de acceso). Crea la cuenta, **verifica el correo remitente** (*Senders*), genera una clave de API (*SMTP & API → API Keys*) y
+**desactiva el bloqueo de IP** (*Security → Authorised IPs*): las IP de Render cambian y, bloqueadas, Brevo responde 401. Plan gratuito: 300 correos
+al día. La clave de API, no la contraseña SMTP, es la que usa la aplicación. Para comprobarlo: en la app, como propietario, *Ajustes → Mi cuenta → Enviar
+correo de prueba*; si falla, muestra el motivo exacto que devuelve Brevo. Con un dominio propio verificado en Brevo los correos mejoran su
+reputación y dejan de salir de una dirección `brevosend.com`.
+
+**Firebase (FCM)**. Un proyecto con una app Android `com.tinotify.app`. La *cuenta de servicio* (rol de Firebase Cloud Messaging) va a Render como
+Secret File; el `google-services.json` va como secreto de GitHub Actions para compilar la app. Ninguno de los dos va al repositorio.
+
+## 6. Desplegar una versión del backend
+
+1. **PR a `main`**: se ejecutan `backend-tests` (pytest en Linux y Windows) y el análisis de Sonar. No se fusiona en rojo.
+2. **Si el PR trae una migración**, aplícala en Supabase **antes** de desplegar (son aditivas y retrocompatibles).
+3. **Fusionar**: con Auto-Deploy *On Commit* y el filtro `backend/**`, Render despliega solo; si lo tienes en *Off*, pulsa *Manual Deploy → Deploy latest commit*.
+4. **Si el cambio trae variables de entorno nuevas**, añádelas **después** de que ese despliegue esté *Live*. Antes, el servicio rechaza la variable
+   desconocida y **no arranca** (`opcion_desconocida`).
+5. **Verificar** (§7).
+
+## 7. Verificación
 
 ```powershell
 .\backend\.venv\Scripts\python.exe -B backend\scripts\verificar_remoto_real.py --url https://tinotify.onrender.com
-.\backend\.venv\Scripts\python.exe -B backend\scripts\verificar_remoto_real.py --url https://tinotify.onrender.com --con-token
 ```
-Esperado sin token: `/health` con clave `status`, `/real/cases` 401, `/sintetico/casos` 404, `"aplicacion": "real_remoto"`. Con token:
-`/real/sesion/estado` 200, `expedientes` 1, `sesion_activa` false, veredicto `ok`. Un 403 con pista de transporte indica que el par TCP del
-proxy de Render no está en `privadas`: el log trae `transporte_rechazado ... par=<ip>` y se fija ese rango (CIDR ≥ /24) en
-`TINOTIFY_RR_PROXIES_CONFIABLES`; no se desactiva la validación HTTPS. Ninguna de estas rutas llega a SIGAC.
 
-## 5. Prueba única de autenticación real **[AUTORIZACIÓN ESPECÍFICA; NO ejecutar antes]**
+Esperado sin token: `GET /health` → `{"status":"ok"}`, `/real/expedientes` y `/real/monitor/estado` → 401 y veredicto `ok`. Una ruta nueva que responde
+**404** en lugar de 401/422 indica que Render sigue con el código anterior. Ninguna de estas comprobaciones llega a SIGAC.
 
-```powershell
-.\backend\.venv\Scripts\python.exe -B backend\scripts\prueba_login_remoto.py --url https://tinotify.onrender.com
-```
-Solo pide credenciales si, con GET sin autenticación, comprueba que el destino es el backend real; un solo `POST /real/sesion`; cierra la
-sesión. 200 = Render alcanza SIGAC y la lectura contiene la referencia; 403 = SIGAC no confirmó el acceso o se rechazó el transporte;
-502 = SIGAC no respondió como se esperaba o no es alcanzable desde Render; 422 = la lectura no contiene la referencia.
+## 8. Primer arranque de las cuentas
 
-## 6. Recuperación (rollback) a la configuración anterior
+1. Con `CUENTAS=1`, `BREVO_*` configurado y las migraciones aplicadas, abre la app → **Acceso del propietario** (solo el código del servidor).
+2. En *Administración* pulsa **Enviar correo de prueba** (Ajustes → Mi cuenta) para comprobar Brevo y luego **Crear invitación**.
+3. Regístrate con tu correo y conviértete en administrador (una sola vez; solo es seguro si esa es la única cuenta):
 
-`main` y `deploy/sintetico-render` no se modifican en ningún paso (`main@4934a3f`, `deploy/sintetico-render@611e9a2`, mismo árbol). Orden
-(Render usa la configuración vigente al redesplegar, por eso se restaura primero la configuración):
-1. Restaurar las variables `TINOTIFY_SR_*` desde tu gestor; retirar las `TINOTIFY_RR_*` y los Secret Files `acreditacion_sigac.json` y
-   `referencia_portable.json` (`supabase-ca.crt` sigue ahí).
-2. Settings → Branch → **`main`**; Start Command → `python -m uvicorn tinotify.sintetico_remoto.app:crear_app --factory --host 0.0.0.0 --port "$PORT" --workers 1 --no-proxy-headers`
-   (o el valor que anotaste, si difería).
-3. Manual Deploy del último commit de `main` — equivale al código anterior si el commit desplegado era `4934a3f` (o su equivalente
-   `611e9a2`); si el panel mostraba otro hash, desplegar ese commit concreto (*Deploys → Rollback*, tras restaurar la configuración).
-4. Comprobar: `/health` → `{"estado":"ok"}` y `/sintetico/casos` → 401.
-Supabase no se modifica durante el cambio ni durante el rollback.
+   ```sql
+   UPDATE tinotify_real.usuarios SET es_admin = true
+   WHERE id = (SELECT id FROM tinotify_real.usuarios ORDER BY consentimiento_en DESC LIMIT 1);
+   ```
 
-## 7. Bloqueos y riesgos
+4. Desde el panel invita a las demás personas; cada una se registra con su propio correo, verifica el código y conecta su SIGAC.
 
-**Bloqueos técnicos:** ninguno en el código ni en la rama (ver verificaciones). La rama `deploy/real-remoto` queda publicada solo cuando se ejecuta
-la sección 2 con tu autorización; el cambio de Render es un paso aparte.
+## 9. Problemas frecuentes
 
-**Riesgos que solo se resuelven al desplegar:**
-- SIGAC podría no ser alcanzable desde las IP de Render (lo resuelve la prueba única de la sección 5).
-- El rango del proxy de Render no está verificado (falla cerrado; se corrige con un CIDR).
-- El hash exacto desplegado no consta en Git (ver sección 0): anótalo antes de cambiar nada.
-- Plan gratuito: se duerme tras 15 min sin tráfico (~1 min de arranque en frío) y descarta el historial en memoria (por diseño); Android deberá
-  ampliar su timeout. 750 horas gratuitas al mes por espacio de trabajo.
-- Credenciales institucionales en un tercero (TLS terminado en el proxy de Render): decisión tuya.
-- Tres errores de clave bloquean el login 15 minutos.
-- Hasta actualizar Android, la app seguirá apuntando a `127.0.0.1` o al sintético.
+| Síntoma | Causa probable | Qué hacer |
+| --- | --- | --- |
+| El servicio no arranca: `opcion_desconocida: TINOTIFY_RR_…` | Variable añadida antes de desplegar el código que la reconoce | Desplegar primero la versión nueva (o retirar la variable) |
+| `fcm_cuenta_ausente_o_invalida` | La ruta del Secret File de Firebase no coincide o el JSON no es válido | Corregir el nombre del archivo en `FCM_CUENTA_SERVICIO` |
+| Una ruta nueva da 404 | Render no ha desplegado el último commit | Revisar *Deploys*; si hace falta, *Deploy latest commit* |
+| El código de acceso no llega | Brevo bloquea la IP, remitente sin verificar o cuenta sin activar | *Enviar correo de prueba* y leer el motivo; revisar *Authorised IPs* y *Senders* |
+| La app dice que no hay conexión al abrir | El servicio dormía | Esperar hasta un minuto; fuera de 8:00–17:59 es normal |
+| «Revisión atrasada» en Inicio | GitHub no ejecutó el cron, o falló la revisión | Mirar *Actions → monitor-real* y, si hace falta, *Run workflow* |
+| 403 con `transporte_rechazado par=<ip>` en el log | El proxy de Render está fuera de `PROXIES_CONFIABLES` | Fijar ese rango CIDR (≥ /24); no se desactiva la validación HTTPS |
+| Tres errores de clave en SIGAC | SIGAC bloquea el acceso 15 minutos | Esperar; la persona actualiza su clave desde la app |
+| `503 Almacen no disponible` | Supabase inaccesible o credenciales del login restringido incorrectas | Revisar `PG_*` y el estado de Supabase |
 
-## 9. Monitor (opcional, se activa solo con sus variables)
+## 10. Recuperación (rollback)
 
-Con las variables del monitor (ver `render.yaml`) el servicio añade: guardar las credenciales **cifradas** (AES-256-GCM;
-la llave solo está en Render) al iniciar sesión con `"recordar": true`, y revisar **todos** los expedientes comparando huellas con clave contra
-el estado en Supabase (`tinotify_real`; ver `docs/monitor-real-supabase.md`). Rutas: `POST /real/monitor/ejecutar`, `GET /real/monitor/avisos` y
-`POST /real/monitor/avisos/{id}/entregado` (token del monitor, distinto del de la app); `GET /real/monitor/estado` y `DELETE /real/credenciales` (token
-de la app). Las respuestas llevan solo conteos y los UUID de los avisos. Sin esas variables, el servicio se comporta como antes (sin rutas de monitor).
-Quitar las variables del monitor es el rollback de esta fase. Validado en Linux (Python 3.11.9, dependencias con hashes) y contra PostgreSQL 17 real con el
-login restringido: `bash supabase/checks/validar_almacen_real_python.sh`.
+- **Código**: en Render, *Deploys → Rollback* al despliegue anterior. Como las migraciones son aditivas, el código previo sigue funcionando con el esquema nuevo.
+- **Migración**: ejecutar su `_down.sql` (borra solo lo que esa migración añadió). Hacerlo **después** de volver al código anterior.
+- **Variable nueva que impide el arranque**: retirarla del panel y volver a desplegar.
+- **App**: publicar una versión nueva; el APK anterior sigue disponible en su release.
+
+## 11. Seguridad y secretos
+
+| Secreto | Vive en | Si se filtra o se pierde |
+| --- | --- | --- |
+| `TOKEN`, `MONITOR_TOKEN` | Render y (el segundo) GitHub | Generar uno nuevo y actualizar ambos sitios |
+| `CLAVE_CIFRADO` | Render (y una copia privada tuya) | **Perdida: los datos cifrados quedan ilegibles.** Filtrada: rotar y volver a cifrar |
+| `PG_PASSWORD` | Render | `\password tinotify_real_login` y actualizar Render |
+| `BREVO_CLAVE` | Render | Revocar en Brevo y crear otra |
+| Cuenta de servicio de Firebase | Render (Secret File) | Revocar la clave en Firebase y subir otra |
+| Clave de firma de la app | GitHub (secreto) y copia privada | **Perdida: no se pueden publicar actualizaciones;** las personas deben reinstalar |
+| Credenciales SIGAC de las personas | Supabase, **cifradas** | Se borran desde el panel de administración o por la propia persona |
+
+El servicio nunca registra credenciales, correos, códigos ni contenido de actuaciones. Más detalle en [seguridad](security.md) y en la
+[política de tratamiento de datos](legal/politica-tratamiento-datos.md).
+
+## 12. Historial
+
+El servicio nació con un backend sintético desplegado desde `main` y pasó a un backend real desde una rama dedicada (`deploy/real-remoto`) con una
+revisión previa de lo publicado. Hoy se despliega directamente desde `main` (el repositorio es público y el servicio solo usa `backend/`). La rama
+`deploy/real-remoto` queda sin uso y puede borrarse. El código del backend sintético sigue en el repositorio, pero el servicio no lo carga.
