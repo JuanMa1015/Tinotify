@@ -72,7 +72,7 @@ sa -c "ALTER ROLE supa_admin SUPERUSER PASSWORD '$CLAVE_ADMIN';" || exit 1
 echo "== Dependencias con hashes (Linux, Python 3.11.9) + pruebas del monitor y del almacen contra PostgreSQL real"
 docker run --rm --network "$RED" -v "$RAIZ:/repo:ro" -e PYTHONDONTWRITEBYTECODE=1 \
     -e TINOTIFY_TEST_PG_HOST="$PG" -e TINOTIFY_TEST_PG_USER=tinotify_real_login -e TINOTIFY_TEST_PG_PASSWORD="$CLAVE_LOGIN" \
-    -e PRUEBAS="${PRUEBAS:-backend/tests/test_almacen_cuentas_pg.py backend/tests/test_almacen_expedientes_pg.py backend/tests/test_almacen_canales_pg.py backend/tests/test_almacen_usuarios_pg.py backend/tests/test_servicio_cuentas.py backend/tests/test_cuentas.py backend/tests/test_almacen_real_contrato.py}" -e TINOTIFY_TEST_PG_ADMIN_USER=supa_admin -e TINOTIFY_TEST_PG_ADMIN_PASSWORD="$CLAVE_ADMIN" -e PIP_DISABLE_PIP_VERSION_CHECK=1 "$IMG_PY" bash -c '
+    -e PRUEBAS="${PRUEBAS:-backend/tests/test_almacen_cuentas_pg.py backend/tests/test_almacen_expedientes_pg.py backend/tests/test_almacen_canales_pg.py backend/tests/test_almacen_usuarios_pg.py backend/tests/test_conexiones_pg.py backend/tests/test_servicio_cuentas.py backend/tests/test_cuentas.py backend/tests/test_almacen_real_contrato.py}" -e TINOTIFY_TEST_PG_ADMIN_USER=supa_admin -e TINOTIFY_TEST_PG_ADMIN_PASSWORD="$CLAVE_ADMIN" -e PIP_DISABLE_PIP_VERSION_CHECK=1 "$IMG_PY" bash -c '
       set -e
       python -V
       pip install -q --require-hashes --only-binary=:all: -r /repo/backend/requirements-dev.txt -r /repo/backend/requirements-build.txt 2>&1 | tail -2
